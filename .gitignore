@@ -27,3 +27,6 @@ TestResults.xml
 *tests/
 
 agent.md
+claude.md
+
+.env
