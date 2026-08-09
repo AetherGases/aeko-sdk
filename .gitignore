@@ -21,3 +21,10 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+*__pycache__/
+*vscode/
+*AGENT_DOCS/
+*tests/
+
+agent.md
