@@ -46,7 +46,7 @@ def _render_instructions(prompt: PromptSpec) -> str:
 
     rendered_sections = []
     for title, content in sections:
-        rendered_sections.append(f"{title}\n{content if content else ''}".rstrip())
+        rendered_sections.append(f"{title}\n{content if content else '(No content for this section)'}".rstrip())
 
     return "\n\n".join(rendered_sections)
 
