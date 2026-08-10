@@ -33,7 +33,7 @@ def agents():
 
 def _ask_identity(agent):
     result = agent.invoke({"messages": [HumanMessage(content=IDENTITY_QUESTION)]})
-    return result["messages"][-1].content
+    return result["output"]
 
 
 @requires_gemini_api_key
