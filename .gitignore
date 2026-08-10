@@ -24,7 +24,6 @@ TestResults.xml
 *__pycache__/
 *vscode/
 *AGENT_DOCS/
-*tests/
 
 agent.md
 claude.md
