@@ -38,7 +38,7 @@ def _render_instructions(prompt: PromptSpec) -> str:
     sections = [
         ("# Contexto Inicial", prompt.initial_context),
         ("# Escopo", prompt.scope),
-        ("# Persona", prompt.persona),
+        ("# Persona", "Voce é o agente: " + prompt.agent + " - Você deve atuar com base em: " + prompt.persona),
         ("# Tarefas", "\n".join(f"- {task}" for task in prompt.tasks)),
         ("# Ferramentas Disponiveis", "\n".join(f"- {tool}" for tool in prompt.tools)),
         ("# Agentes disponiveis", "\n".join(f"- {agent}" for agent in prompt.next_agents)),
