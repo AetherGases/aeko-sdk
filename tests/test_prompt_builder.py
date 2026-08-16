@@ -26,10 +26,20 @@ def test_build_prompt_supports_kwargs_and_preserves_titles():
     assert "# Tarefas" in system_content
     assert "# Ferramentas Disponiveis" in system_content
     assert "# Agentes disponiveis" in system_content
+    assert "# Formato da Resposta" in system_content
     assert "Responder dúvidas" in system_content
     assert "- responder" in system_content
     assert "- busca" in system_content
     assert "- router" in system_content
+
+
+def test_build_prompt_instructs_next_agent_marker():
+    prompt_template = build_prompt(agent="FAQ", scope="Responder dúvidas")
+
+    system_content = _system_content(prompt_template)
+
+    assert "Next agent:" in system_content
+    assert "Nenhum" in system_content
 
 
 def test_build_prompt_only_requires_messages_as_input():
