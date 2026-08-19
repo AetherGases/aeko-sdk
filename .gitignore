@@ -22,10 +22,14 @@ rad.json
 #Test results file
 TestResults.xml
 *__pycache__/
+*.pyc
+*.pyo
+*.pyd
 *vscode/
 *AGENT_DOCS/
 
 agent.md
 claude.md
+.claude/
 
 .env

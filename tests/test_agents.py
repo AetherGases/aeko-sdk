@@ -14,6 +14,7 @@ EXPECTED_AGENTS = {
     "Roteador": "roteador",
     "FAQ": "faq",
     "Orquestrador": "orquestrador",
+    "Guardrail de Saída": "guardrail",
     "Análista de inventários": "invent",
     "Analista de Poluentes": "poluente",
     "Analista de Gases Verdes": "gases verdes",
