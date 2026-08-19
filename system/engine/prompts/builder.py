@@ -38,16 +38,10 @@ def _render_instructions(prompt: PromptSpec) -> str:
     sections = [
         ("# Contexto Inicial", prompt.initial_context),
         ("# Escopo", prompt.scope),
-        ("# Persona", "Voce é o agente: " + prompt.agent + " - Você deve atuar com base em: " + prompt.persona),
+        ("# Persona", prompt.persona),
         ("# Tarefas", "\n".join(f"- {task}" for task in prompt.tasks)),
         ("# Ferramentas Disponiveis", "\n".join(f"- {tool}" for tool in prompt.tools)),
         ("# Agentes disponiveis", "\n".join(f"- {agent}" for agent in prompt.next_agents)),
-        ("# Formato da Resposta", (
-            "Ao final da sua resposta, adicione uma nova linha no formato exato "
-            "\"Next agent: <Nome>\", usando exatamente um dos nomes listados em "
-            "\"Agentes disponiveis\". Se nao houver um proximo agente (fluxo "
-            "encerrado), utilize \"Next agent: Nenhum\"."
-        )),
     ]
 
     rendered_sections = []
