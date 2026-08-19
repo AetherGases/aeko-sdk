@@ -10,6 +10,7 @@ from system.engine.prompts import (
     FAQ_PROMPT,
     GREEN_GASES_ANALYST_PROMPT,
     ORCHESTRATOR_PROMPT,
+    OUTPUT_GUARDRAIL_PROMPT,
     POLLUTANTS_ANALYST_PROMPT,
     REPORT_ANALYST_PROMPT,
     ROUTER_PROMPT
@@ -43,6 +44,7 @@ def create_agents() -> dict[str, Any]:
     agents["Roteador"] = _build_agent(fast_llm, ROUTER_PROMPT)
     agents["FAQ"] = _build_agent(fast_llm, FAQ_PROMPT)
     agents["Orquestrador"] = _build_agent(fast_llm, ORCHESTRATOR_PROMPT)
+    agents["Guardrail de Saída"] = _build_agent(fast_llm, OUTPUT_GUARDRAIL_PROMPT)
 
     # High-effort llms
     agents["Análista de inventários"] = _build_agent(slow_llm, REPORT_ANALYST_PROMPT)
