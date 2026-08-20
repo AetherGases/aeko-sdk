@@ -22,6 +22,17 @@ AGENT_SCRATCHPAD = MessagesPlaceholder(variable_name="agent_scratchpad")
 
 
 def _build_agent(llm: BaseChatModel, prompt: ChatPromptTemplate) -> AgentExecutor:
+    """
+    Build a tool-calling agent executor from an LLM and a prompt template.
+
+    Args:
+        llm: The chat model backing the agent.
+        prompt: The prompt template driving the agent's behavior.
+
+    Returns:
+        AgentExecutor: A tool-less agent executor ready to be invoked.
+    """
+
     tool_calling_agent = create_tool_calling_agent(llm, [], prompt + AGENT_SCRATCHPAD)
     return AgentExecutor(agent=tool_calling_agent, tools=[])
 

@@ -6,6 +6,16 @@ load_dotenv()
 
 
 def create_llms():
+    """
+    Create the fast and slow chat models used across the agent system.
+
+    Each model falls back to the other on failure.
+
+    Returns:
+        tuple[BaseChatModel, BaseChatModel]: The fast LLM (with the slow LLM as
+            fallback) and the slow LLM (with the fast LLM as fallback).
+    """
+
     fast_llm = ChatGoogleGenerativeAI(
         model="gemini-3.1-flash-lite",
         temperature=0.7,

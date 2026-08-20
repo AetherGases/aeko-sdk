@@ -8,10 +8,31 @@ GUARD_RAIL_MAX_RETRIES = 3
 
 
 def _entry_router(state: AetherGraphState, config: RunnableConfig) -> str:
+    """
+    Decide which node the graph run should start at.
+
+    Args:
+        state: The current graph state (unused, kept for the router signature).
+        config: The run's configuration, optionally carrying an "entry_point".
+
+    Returns:
+        str: The configured entry point, defaulting to "Roteador".
+    """
+
     return config.get("configurable", {}).get("entry_point", "Roteador")
 
 
 def _route_by_next_agent(default: str):
+    """
+    Build a router that forwards to the agent named in the state's "next_agent".
+
+    Args:
+        default: The node to route to when no "next_agent" is set.
+
+    Returns:
+        Callable[[AetherGraphState], str]: A routing function for conditional edges.
+    """
+
     def route(state: AetherGraphState) -> str:
         next_agent = state.get("next_agent")
         return next_agent["agent"] if next_agent else default
@@ -20,6 +41,21 @@ def _route_by_next_agent(default: str):
 
 
 def _route_from_analyst(default: str):
+    """
+    Build a router used after a specialist analyst node runs.
+
+    Behaves like `_route_by_next_agent`, except that when the graph entered
+    through the inventory analyst and the next target would be "Orquestrador",
+    it redirects to "Coordenador de Melhoria Contínua" instead.
+
+    Args:
+        default: The node to route to when no "next_agent" is set.
+
+    Returns:
+        Callable[[AetherGraphState, RunnableConfig], str]: A routing function for
+            conditional edges.
+    """
+
     def route(state: AetherGraphState, config: RunnableConfig) -> str:
         next_agent = state.get("next_agent")
         target = next_agent["agent"] if next_agent else default
@@ -34,6 +70,16 @@ def _route_from_analyst(default: str):
 
 
 def _route_from_guardrail(state: AetherGraphState) -> str:
+    """
+    Decide whether the guardrail's verdict ends the run or sends it back for retry.
+
+    Args:
+        state: The current graph state, whose last message holds the verdict.
+
+    Returns:
+        str: END when approved or the retry cap is exceeded, otherwise "Roteador".
+    """
+
     last_message = state["messages"][-1]["content"]
     approved = last_message.strip().lower().startswith("aprovado")
 
@@ -44,6 +90,13 @@ def _route_from_guardrail(state: AetherGraphState) -> str:
 
 
 def build_graph() -> StateGraph:
+    """
+    Assemble the Aether multi-agent state graph, wiring every node and edge.
+
+    Returns:
+        StateGraph: The uncompiled graph, ready for `.compile()`.
+    """
+
     graph = StateGraph(AetherGraphState)
 
     graph.add_node("Roteador", nodes.roteador_node)
