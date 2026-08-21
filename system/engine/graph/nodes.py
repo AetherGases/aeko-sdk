@@ -8,6 +8,20 @@ from system.engine.agents.agents import create_agents
 _AGENTS = create_agents()
 
 
+def _format_findings(previous_agents: dict[str, str]) -> str:
+    """
+    Format previous_agents entries as a "- name: output" bullet list.
+
+    Args:
+        previous_agents: Mapping of agent name to its output.
+
+    Returns:
+        str: The bullet-formatted findings, one per line.
+    """
+
+    return "\n".join(f"- {name}: {output}" for name, output in previous_agents.items())
+
+
 def _build_context_message(state: AetherGraphState) -> HumanMessage:
     """
     Build an isolated handoff message from structured state, not raw history.
@@ -38,8 +52,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
 
     previous = state.get("previous_agents") or {}
     if previous:
-        findings = "\n".join(f"- {name}: {output}" for name, output in previous.items())
-        parts.append(f"Análises recebidas até agora:\n{findings}")
+        parts.append(f"Análises recebidas até agora:\n{_format_findings(previous)}")
 
     requested_changes = state.get("guard_rail_requested_changes") or []
     if requested_changes:
@@ -70,16 +83,16 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
             question, and any supporting findings.
     """
 
-    draft = state["previous_agents"].get("Orquestrador", "")
+    previous = state.get("previous_agents") or {}
+    draft = previous.get("Orquestrador", "")
     parts = [
         f"Revise esta resposta: '{draft}'",
         f"Pergunta original do usuário: {state['initial_question']}",
     ]
 
-    findings = {name: output for name, output in state["previous_agents"].items() if name != "Orquestrador"}
+    findings = {name: output for name, output in previous.items() if name != "Orquestrador"}
     if findings:
-        findings_text = "\n".join(f"- {name}: {output}" for name, output in findings.items())
-        parts.append(f"Análises recebidas:\n{findings_text}")
+        parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
 
     return HumanMessage(content="\n\n".join(parts))
 
@@ -182,6 +195,33 @@ def _non_specialist_node_factory(agent_name: str, *, terminal: bool = False) -> 
     return node
 
 
+def _roteador_node(state: AetherGraphState) -> dict:
+    """
+    Invoke the router, code-enforcing that "Orquestrador" is only ever chosen
+    when there's already something for it to consolidate.
+
+    The router's own prompt instructs it to pick "Orquestrador" only on a
+    retry with existing specialist findings, never on a fresh question — but
+    that's a soft constraint on a fast/lightweight model, and this exact
+    mistake has already happened once. Overriding it here in code closes the
+    gap for good, independent of how reliably the prompt is followed.
+
+    Args:
+        state: The current graph state.
+
+    Returns:
+        dict: The state update.
+    """
+
+    message = _build_context_message(state)
+    output, next_agent = _invoke_agent("Roteador", message)
+
+    if next_agent and next_agent["agent"] == "Orquestrador" and not state.get("previous_agents"):
+        next_agent = {"agent": "Análista de inventários", "message": output}
+
+    return {"next_agent": next_agent}
+
+
 def _orquestrador_node(state: AetherGraphState) -> dict:
     """
     Invoke the orchestrator and record its draft answer for the guardrail to review.
@@ -232,7 +272,7 @@ def _guardrail_node(state: AetherGraphState) -> dict:
     update = {"next_agent": next_agent, "guard_rail_approved": approved}
 
     if approved:
-        draft = state["previous_agents"].get("Orquestrador", "")
+        draft = (state.get("previous_agents") or {}).get("Orquestrador", "")
         update["messages"] = [{"role": "assistant", "content": draft, "name": "Orquestrador"}]
     else:
         update["guard_rail_requested_changes"] = [output]
@@ -241,7 +281,7 @@ def _guardrail_node(state: AetherGraphState) -> dict:
     return update
 
 
-roteador_node = _non_specialist_node_factory("Roteador")
+roteador_node = _roteador_node
 faq_node = _non_specialist_node_factory("FAQ", terminal=True)
 orquestrador_node = _orquestrador_node
 guardrail_node = _guardrail_node

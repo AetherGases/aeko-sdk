@@ -227,6 +227,47 @@ def test_non_specialist_node_factory_terminal_writes_messages(monkeypatch):
     assert result["next_agent"] is None
 
 
+# --- _roteador_node ---------------------------------------------------------
+
+
+def test_roteador_node_overrides_premature_orquestrador_routing(monkeypatch):
+    monkeypatch.setattr(nodes, "_AGENTS", {
+        "Roteador": _FakeAgent("Only text.\nNext agent: Orquestrador"),
+        "Orquestrador": _FakeAgent("dummy"),
+    })
+
+    result = nodes._roteador_node(_state_with())
+
+    assert result["next_agent"] == {
+        "agent": "Análista de inventários",
+        "message": "Only text.\nNext agent: Orquestrador",
+    }
+
+
+def test_roteador_node_allows_orquestrador_when_previous_agents_exist(monkeypatch):
+    monkeypatch.setattr(nodes, "_AGENTS", {
+        "Roteador": _FakeAgent("Direcionando.\nNext agent: Orquestrador"),
+        "Orquestrador": _FakeAgent("dummy"),
+    })
+
+    state = _state_with(previous_agents={"Analista de Gases Verdes": "Recomendo hidrogenio verde."})
+    result = nodes._roteador_node(state)
+
+    assert result["next_agent"] == {"agent": "Orquestrador", "message": "Direcionando.\nNext agent: Orquestrador"}
+
+
+def test_roteador_node_never_writes_messages(monkeypatch):
+    monkeypatch.setattr(nodes, "_AGENTS", {
+        "FAQ": _FakeAgent("dummy"),
+        "Roteador": _FakeAgent("Direcionando.\nNext agent: FAQ"),
+    })
+
+    result = nodes._roteador_node(_state_with())
+
+    assert "messages" not in result
+    assert "previous_agents" not in result
+
+
 def test_next_agent_is_none_when_marker_absent(monkeypatch):
     monkeypatch.setattr(nodes, "_AGENTS", {
         "FAQ": _FakeAgent("Resposta sem marcador de proximo agente."),
