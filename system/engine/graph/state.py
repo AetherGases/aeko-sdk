@@ -53,6 +53,7 @@ class AetherGraphState(MessagesState):
     pending_agents: Annotated[list[PendingAgents], _merge_pending_agents]
     guard_rail_requested_changes: list[str]
     guard_rail_retries: int
+    guard_rail_approved: bool
     company_context: str
 
 
@@ -79,5 +80,6 @@ def create_initial_state(initial_question: str, company_context: str = "") -> Ae
         pending_agents=[],
         guard_rail_requested_changes=[],
         guard_rail_retries=0,
+        guard_rail_approved=False,
         company_context=company_context,
     )

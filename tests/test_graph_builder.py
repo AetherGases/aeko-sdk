@@ -9,6 +9,7 @@ def _state(**overrides):
         "next_agent": None,
         "guard_rail_retries": 0,
         "guard_rail_requested_changes": [],
+        "guard_rail_approved": False,
     }
     base.update(overrides)
     return base
@@ -71,20 +72,20 @@ def test_route_from_analyst_default_target_also_gets_overridden():
 
 
 def test_route_from_guardrail_approved_ends_the_graph():
-    state = _state(messages=[{"role": "assistant", "content": "Aprovado. Tudo certo."}])
+    state = _state(guard_rail_approved=True)
 
     assert builder._route_from_guardrail(state) == END
 
 
 def test_route_from_guardrail_rejected_goes_back_to_roteador():
-    state = _state(messages=[{"role": "assistant", "content": "Reprovado. Falta fundamentação."}], guard_rail_retries=0)
+    state = _state(guard_rail_approved=False, guard_rail_retries=0)
 
     assert builder._route_from_guardrail(state) == "Roteador"
 
 
 def test_route_from_guardrail_rejected_past_retry_cap_ends_anyway():
     state = _state(
-        messages=[{"role": "assistant", "content": "Reprovado. Falta fundamentação."}],
+        guard_rail_approved=False,
         guard_rail_retries=builder.GUARD_RAIL_MAX_RETRIES + 1,
     )
 

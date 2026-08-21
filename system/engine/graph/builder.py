@@ -74,16 +74,13 @@ def _route_from_guardrail(state: AetherGraphState) -> str:
     Decide whether the guardrail's verdict ends the run or sends it back for retry.
 
     Args:
-        state: The current graph state, whose last message holds the verdict.
+        state: The current graph state, carrying the guardrail's verdict.
 
     Returns:
         str: END when approved or the retry cap is exceeded, otherwise "Roteador".
     """
 
-    last_message = state["messages"][-1]["content"]
-    approved = last_message.strip().lower().startswith("aprovado")
-
-    if approved or state["guard_rail_retries"] > GUARD_RAIL_MAX_RETRIES:
+    if state["guard_rail_approved"] or state["guard_rail_retries"] > GUARD_RAIL_MAX_RETRIES:
         return END
 
     return "Roteador"
