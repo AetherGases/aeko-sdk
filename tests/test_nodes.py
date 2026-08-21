@@ -239,7 +239,7 @@ def test_roteador_node_overrides_premature_orquestrador_routing(monkeypatch):
     result = nodes._roteador_node(_state_with())
 
     assert result["next_agent"] == {
-        "agent": "Análista de inventários",
+        "agent": "FAQ",
         "message": "Only text.\nNext agent: Orquestrador",
     }
 

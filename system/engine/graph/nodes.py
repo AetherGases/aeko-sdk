@@ -204,7 +204,8 @@ def _roteador_node(state: AetherGraphState) -> dict:
     retry with existing specialist findings, never on a fresh question — but
     that's a soft constraint on a fast/lightweight model, and this exact
     mistake has already happened once. Overriding it here in code closes the
-    gap for good, independent of how reliably the prompt is followed.
+    gap for good, independent of how reliably the prompt is followed, by
+    falling back to "FAQ" instead.
 
     Args:
         state: The current graph state.
@@ -217,7 +218,7 @@ def _roteador_node(state: AetherGraphState) -> dict:
     output, next_agent = _invoke_agent("Roteador", message)
 
     if next_agent and next_agent["agent"] == "Orquestrador" and not state.get("previous_agents"):
-        next_agent = {"agent": "Análista de inventários", "message": output}
+        next_agent = {"agent": "FAQ", "message": output}
 
     return {"next_agent": next_agent}
 
