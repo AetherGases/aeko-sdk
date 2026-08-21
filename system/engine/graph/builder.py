@@ -119,7 +119,6 @@ def build_graph() -> StateGraph:
         _route_by_next_agent("FAQ"),
         {
             "FAQ": "FAQ",
-            "Análista de inventários": "Análista de inventários",
             "Analista de Poluentes": "Analista de Poluentes",
             "Analista de Gases Verdes": "Analista de Gases Verdes",
             "Coordenador de Melhoria Contínua": "Coordenador de Melhoria Contínua",

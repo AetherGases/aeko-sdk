@@ -19,7 +19,6 @@ ROUTER_PROMPT = build_prompt(
     ],
     next_agents=[
         "FAQ - Para dúvidas institucionais ou conceituais gerais",
-        "Análista de inventários - Para análises de inventário de gases no padrão GHG",
         "Analista de Poluentes - Para análises de impacto ambiental de gases poluentes em processos industriais",
         "Analista de Gases Verdes - Para recomendações de gases verdes para aplicações industriais",
         "Coordenador de Melhoria Contínua - Para identificação de oportunidades de otimização de processos industriais",
@@ -29,10 +28,6 @@ ROUTER_PROMPT = build_prompt(
         {
             "pergunta": "O que é hidrogênio verde?",
             "resposta": "Direcionando para o FAQ, pois trata-se de uma dúvida conceitual geral."
-        },
-        {
-            "pergunta": "Aqui está o inventário GHG completo da minha fábrica de 2023, com dados de todos os escopos. Podem analisar?",
-            "resposta": "Direcionando para o Análista de inventários, pois a solicitação envolve análise estruturada de um inventário GHG."
         },
         {
             "pergunta": "Minha refinaria emite NOx e SO2 em níveis que desconfio estarem acima do permitido, qual o risco ambiental disso?",
