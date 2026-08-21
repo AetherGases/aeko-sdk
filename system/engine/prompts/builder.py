@@ -31,17 +31,41 @@ class IPrompt(PromptSpec):
 
 
 def _current_datetime() -> str:
+    """
+    Format the current local time for the prompt's "Contexto Temporal" section.
+
+    Returns:
+        str: The current date and time, e.g. "Monday, 19 de August de 2026 — 14:30:00".
+    """
+
     return datetime.now(timezone.utc).astimezone().strftime("%A, %d de %B de %Y — %H:%M:%S %Z")
 
 
 def _render_instructions(prompt: PromptSpec) -> str:
+    """
+    Render a PromptSpec's fields into the system prompt's instruction sections.
+
+    Args:
+        prompt: The spec describing the agent's scope, persona, tasks, tools and
+            possible next agents.
+
+    Returns:
+        str: The rendered instructions, as titled sections joined by blank lines.
+    """
+
     sections = [
         ("# Contexto Inicial", prompt.initial_context),
         ("# Escopo", prompt.scope),
-        ("# Persona", prompt.persona),
+        ("# Persona", "Voce é o agente: " + prompt.agent + " - Você deve atuar com base em: " + prompt.persona),
         ("# Tarefas", "\n".join(f"- {task}" for task in prompt.tasks)),
         ("# Ferramentas Disponiveis", "\n".join(f"- {tool}" for tool in prompt.tools)),
         ("# Agentes disponiveis", "\n".join(f"- {agent}" for agent in prompt.next_agents)),
+        ("# Formato da Resposta", (
+            "Ao final da sua resposta, adicione uma nova linha no formato exato "
+            "\"Next agent: <Nome>\", usando exatamente um dos nomes listados em "
+            "\"Agentes disponiveis\". Se nao houver um proximo agente (fluxo "
+            "encerrado), utilize \"Next agent: Nenhum\"."
+        )),
     ]
 
     rendered_sections = []
@@ -55,6 +79,26 @@ _SYSTEM_TEMPLATE = "{instructions}\n\n# Contexto Temporal\nData e hora atuais: {
 
 
 def build_prompt(prompt: IPrompt | PromptSpec | None = None, **kwargs) -> ChatPromptTemplate:
+    """
+    Build a chat prompt template for an agent from a PromptSpec (or its fields).
+
+    Args:
+        prompt: A ready-made PromptSpec/IPrompt instance. Mutually exclusive with
+            passing spec fields as keyword arguments.
+        **kwargs: PromptSpec fields (agent, scope, persona, tasks, tools,
+            next_agents, shots, initial_context) used to build a PromptSpec when
+            `prompt` is not given.
+
+    Returns:
+        ChatPromptTemplate: A system message (with rendered instructions and the
+            current date/time), optional few-shot examples, and a placeholder for
+            runtime "messages".
+
+    Raises:
+        ValueError: If both `prompt` and keyword arguments are given.
+        TypeError: If `prompt` is given but isn't a PromptSpec instance.
+    """
+
     if prompt is None:
         prompt = PromptSpec(**kwargs)
     elif kwargs:
