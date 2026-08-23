@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aeko"
+description = "Intelligent core of the Aether ecosystem: multi-agent system for GHG inventory analysis, improvement plans and conversational support."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.12"
+authors = [{ name = "Eduardo Costa Amex Macal" }]
+keywords = ["esg", "ghg", "sustainability", "agents", "langchain", "langgraph"]
+dynamic = ["version"]
+
+# Ranges (not the `==` pins of requirements.txt) so installing the SDK next to
+# other LangChain packages does not deadlock a consumer's resolver.
+dependencies = [
+    "langchain-core>=1.5.5,<2",
+    "langchain-classic>=1.0.8,<2",
+    "langgraph>=1.2.11,<2",
+    "langchain-google-genai>=2.1.12,<3",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/AetherGases/aeko-sdk"
+Repository = "https://github.com/AetherGases/aeko-sdk"
+
+[tool.hatch.version]
+path = "aeko/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aeko"]
+
+[tool.hatch.build.targets.sdist]
+include = ["aeko", "tests", "README.md", "LICENSE", "pyproject.toml"]

@@ -1,0 +1,96 @@
+name: Publish to PyPI
+
+# The tag attached to the release is the version that gets published.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails fast when the release tag and aeko.__version__ disagree, instead of
+  # letting PyPI reject the upload at the very last step.
+  verify-version:
+    name: Verify version matches the release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare tag with package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          PKG_VERSION="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' aeko/__init__.py)"
+          TAG_VERSION="${TAG#v}"
+          echo "package: $PKG_VERSION | tag: $TAG_VERSION"
+          if [ -z "$PKG_VERSION" ]; then
+            echo "::error::Could not read __version__ from aeko/__init__.py"
+            exit 1
+          fi
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Release tag '$TAG' does not match __version__ '$PKG_VERSION'. Bump aeko/__init__.py or retag."
+            exit 1
+          fi
+
+  test:
+    name: Tests (Python 3.11)
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        run: pytest
+
+  build:
+    name: Build distributions
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Must match the environment registered in the PyPI trusted publisher.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/aeko
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing; no API token needed.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
