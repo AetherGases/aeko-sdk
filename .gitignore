@@ -34,3 +34,7 @@ claude.md
 
 .env
 result.txt
+# Python build artifacts
+dist/
+build/
+*.egg-info/

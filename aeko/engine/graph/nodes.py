@@ -1,11 +1,97 @@
-from typing import Callable
+from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
-from system.engine.graph.state import AetherGraphState, NextAgent
-from system.engine.agents.agents import create_agents
+from aeko.engine.graph.state import AetherGraphState, NextAgent
+from aeko.engine.agents.agents import create_agents
+from aeko.engine.runtime import RUNTIME
 
-_AGENTS = create_agents()
+# Agents used to be built at import time, which made `Aeko.config()` useless:
+# by the time the consuming API supplied its API key, the LLMs had already been
+# instantiated without one. They are now built on first use and rebuilt whenever
+# the runtime configuration changes.
+#
+# `_AGENTS` stays a module-level dict so it can still be swapped wholesale in
+# tests; when it is non-empty, it wins over the lazily built registry.
+_AGENTS: dict[str, Any] = {}
+
+# Keyed by output token cap: the conversational flow and the inventory report
+# flow share the same agents but not the same room to answer.
+_AGENT_CACHE: dict[int | None, dict[str, Any]] = {}
+
+
+def _get_agents(max_tokens: int | None = None) -> dict[str, Any]:
+    """
+    Return the agent registry for a given output token cap, building it once.
+
+    Args:
+        max_tokens: The output cap the agents should be built with, or None for
+            the configured default.
+
+    Returns:
+        dict[str, Any]: The agents, keyed by the names the graph routes by.
+    """
+
+    if _AGENTS:
+        return _AGENTS
+
+    if max_tokens not in _AGENT_CACHE:
+        _AGENT_CACHE[max_tokens] = create_agents(max_tokens=max_tokens)
+
+    return _AGENT_CACHE[max_tokens]
+
+
+def reset_agents() -> None:
+    """Drop every cached agent, so the next run rebuilds them from the runtime."""
+
+    _AGENT_CACHE.clear()
+
+
+RUNTIME.on_change(reset_agents)
+
+
+def _max_tokens_from(config: RunnableConfig | None) -> int | None:
+    """
+    Read the output token cap a run opted into.
+
+    Args:
+        config: The run's configuration, optionally carrying a "max_tokens".
+
+    Returns:
+        int | None: The requested cap, or None to use the configured default.
+    """
+
+    return (config or {}).get("configurable", {}).get("max_tokens")
+
+
+# How many prior messages of the conversation are replayed to an agent as
+# context. Enough to keep a follow-up question intelligible, bounded so a long
+# session doesn't crowd out the actual question.
+HISTORY_MESSAGE_LIMIT = 10
+
+
+def _format_history(messages: list) -> str:
+    """
+    Format prior conversation turns as a "Usuário:"/"Assistente:" transcript.
+
+    Args:
+        messages: The prior messages, oldest first.
+
+    Returns:
+        str: One labelled line per turn.
+    """
+
+    lines = []
+    for message in messages:
+        if isinstance(message, dict):
+            role, content = message.get("role", "user"), message.get("content", "")
+        else:
+            role, content = getattr(message, "type", "human"), getattr(message, "content", "")
+
+        lines.append(f"{'Usuário' if role in ('human', 'user') else 'Assistente'}: {content}")
+
+    return "\n".join(lines)
 
 
 def _format_findings(previous_agents: dict[str, str]) -> str:
@@ -27,7 +113,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     Build an isolated handoff message from structured state, not raw history.
 
     Every agent's own prompt is designed (see its few-shot examples in
-    system/engine/prompts/) around a single self-contained human turn, never
+    aeko/engine/prompts/) around a single self-contained human turn, never
     around replaying another agent's raw output as chat history. Feeding an
     agent the accumulated `state["messages"]` would eventually end on another
     agent's "ai" turn, which Gemini silently answers with empty content, and
@@ -44,11 +130,24 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
         state: The current graph state.
 
     Returns:
-        HumanMessage: The original question, a summary of any specialist
-            findings gathered so far, and the latest guardrail feedback.
+        HumanMessage: The company context and prior conversation turns, the
+            original question, a summary of any specialist findings gathered so
+            far, and the latest guardrail feedback.
     """
 
-    parts = [state["initial_question"]]
+    parts = []
+
+    company_context = state.get("company_context") or ""
+    if company_context:
+        parts.append(f"Contexto da empresa/usuário:\n{company_context}")
+
+    # The current question is already in `initial_question`; everything before
+    # it is the prior conversation.
+    history = (state.get("messages") or [])[:-1]
+    if history:
+        parts.append(f"Histórico da conversa:\n{_format_history(history[-HISTORY_MESSAGE_LIMIT:])}")
+
+    parts.append(state["initial_question"])
 
     previous = state.get("previous_agents") or {}
     if previous:
@@ -97,13 +196,15 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     return HumanMessage(content="\n\n".join(parts))
 
 
-def _invoke_agent(agent_name: str, message: HumanMessage) -> tuple[str, NextAgent | None]:
+def _invoke_agent(agent_name: str, message: HumanMessage,
+                  max_tokens: int | None = None) -> tuple[str, NextAgent | None]:
     """
     Invoke a named agent with a single isolated message and parse its routing decision.
 
     Args:
         agent_name: The key of the agent to invoke in `_AGENTS`.
         message: The isolated handoff message built for this agent.
+        max_tokens: The output token cap this run opted into.
 
     Returns:
         tuple[str, NextAgent | None]: The agent's raw output text, and the next
@@ -113,13 +214,15 @@ def _invoke_agent(agent_name: str, message: HumanMessage) -> tuple[str, NextAgen
         ValueError: If the agent's output names a next agent that doesn't exist.
     """
 
-    output = _AGENTS[agent_name].invoke({"messages": [message]})["output"]
+    agents = _get_agents(max_tokens)
+
+    output = agents[agent_name].invoke({"messages": [message]})["output"]
 
     raw_next = output.split("Next agent: ")[-1].strip() if "Next agent: " in output else ""
 
     if raw_next in ("", "Nenhum"):
         next_agent = None
-    elif raw_next not in _AGENTS:
+    elif raw_next not in agents:
         raise ValueError(f"Next agent '{raw_next}' is not a valid agent name.")
     else:
         next_agent: NextAgent = {"agent": raw_next, "message": output}
@@ -146,9 +249,9 @@ def _specialist_node_factory(agent_name: str, *, terminal: bool = False) -> Call
         Callable[[AetherGraphState], dict]: A graph node function.
     """
 
-    def node(state: AetherGraphState) -> dict:
+    def node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
         message = _build_context_message(state)
-        output, next_agent = _invoke_agent(agent_name, message)
+        output, next_agent = _invoke_agent(agent_name, message, _max_tokens_from(config))
 
         update = {
             "previous_agents": {agent_name: output},
@@ -181,9 +284,9 @@ def _non_specialist_node_factory(agent_name: str, *, terminal: bool = False) -> 
         Callable[[AetherGraphState], dict]: A graph node function.
     """
 
-    def node(state: AetherGraphState) -> dict:
+    def node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
         message = _build_context_message(state)
-        output, next_agent = _invoke_agent(agent_name, message)
+        output, next_agent = _invoke_agent(agent_name, message, _max_tokens_from(config))
 
         update = {"next_agent": next_agent}
 
@@ -195,7 +298,7 @@ def _non_specialist_node_factory(agent_name: str, *, terminal: bool = False) -> 
     return node
 
 
-def _roteador_node(state: AetherGraphState) -> dict:
+def _roteador_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
     Invoke the router, code-enforcing that "Orquestrador" is only ever chosen
     when there's already something for it to consolidate.
@@ -209,13 +312,14 @@ def _roteador_node(state: AetherGraphState) -> dict:
 
     Args:
         state: The current graph state.
+        config: The run's configuration, carrying the output token cap.
 
     Returns:
         dict: The state update.
     """
 
     message = _build_context_message(state)
-    output, next_agent = _invoke_agent("Roteador", message)
+    output, next_agent = _invoke_agent("Roteador", message, _max_tokens_from(config))
 
     if next_agent and next_agent["agent"] == "Orquestrador" and not state.get("previous_agents"):
         next_agent = {"agent": "FAQ", "message": output}
@@ -223,7 +327,7 @@ def _roteador_node(state: AetherGraphState) -> dict:
     return {"next_agent": next_agent}
 
 
-def _orquestrador_node(state: AetherGraphState) -> dict:
+def _orquestrador_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
     Invoke the orchestrator and record its draft answer for the guardrail to review.
 
@@ -239,7 +343,7 @@ def _orquestrador_node(state: AetherGraphState) -> dict:
     """
 
     message = _build_context_message(state)
-    output, next_agent = _invoke_agent("Orquestrador", message)
+    output, next_agent = _invoke_agent("Orquestrador", message, _max_tokens_from(config))
 
     return {
         "previous_agents": {"Orquestrador": output},
@@ -247,7 +351,7 @@ def _orquestrador_node(state: AetherGraphState) -> dict:
     }
 
 
-def _guardrail_node(state: AetherGraphState) -> dict:
+def _guardrail_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
     Invoke the output guardrail and either promote or hold back the draft answer.
 
@@ -267,7 +371,7 @@ def _guardrail_node(state: AetherGraphState) -> dict:
     """
 
     message = _build_guardrail_message(state)
-    output, next_agent = _invoke_agent("Guardrail de Saída", message)
+    output, next_agent = _invoke_agent("Guardrail de Saída", message, _max_tokens_from(config))
 
     approved = output.strip().lower().startswith("aprovado")
     update = {"next_agent": next_agent, "guard_rail_approved": approved}

@@ -3,8 +3,8 @@ import time
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from system.engine.prompts import builder
-from system.engine.prompts.builder import build_prompt
+from aeko.engine.prompts import builder
+from aeko.engine.prompts.builder import build_prompt
 
 
 def _system_content(prompt_template: ChatPromptTemplate) -> str:

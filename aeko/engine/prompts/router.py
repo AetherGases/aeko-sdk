@@ -1,10 +1,10 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
 
-ROUTER_PROMPT = build_prompt(
+ROUTER_SPEC = PromptSpec(
     agent="Roteador",
     scope="Triagem das mensagens recebidas do usuário, classificando a intenção e direcionando a solicitação para o agente especializado mais adequado do ecossistema Aether.",
     persona="Você é o roteador do ecossistema Aether. Sua função é exclusivamente classificar a intenção do usuário e decidir qual agente deve tratar a solicitação, sem produzir análises técnicas ou recomendações por conta própria.",
@@ -15,8 +15,7 @@ ROUTER_PROMPT = build_prompt(
         "Encaminhar a solicitação ao agente selecionado sem alterar o conteúdo original do pedido do usuário",
         "Se a mensagem incluir 'Pontos apontados pelo Guardrail de Saída na tentativa anterior', avaliar se a reprovação indica que falta a análise de um especialista específico (nesse caso, encaminhar a esse especialista) ou se as análises necessárias já estão completas em 'Análises recebidas até agora' e falta apenas reconsolidar/ajustar a resposta (nesse caso, encaminhar ao Orquestrador)"
     ],
-    tools=[
-    ],
+    tools=[],
     next_agents=[
         "FAQ - Para dúvidas institucionais ou conceituais gerais",
         "Analista de Poluentes - Para análises de impacto ambiental de gases poluentes em processos industriais",
@@ -51,3 +50,5 @@ ROUTER_PROMPT = build_prompt(
         }
     ]
 )
+
+ROUTER_PROMPT = build_prompt(ROUTER_SPEC)

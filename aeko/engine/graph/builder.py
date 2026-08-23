@@ -1,8 +1,11 @@
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from system.engine.graph import nodes
-from system.engine.graph.state import AetherGraphState
+from typing import Any
+
+from aeko.engine.graph import nodes
+from aeko.engine.graph.state import AetherGraphState
+from aeko.engine.runtime import RUNTIME
 
 GUARD_RAIL_MAX_RETRIES = 3
 
@@ -175,3 +178,44 @@ def build_graph() -> StateGraph:
 
 AETHER_GRAPH = build_graph()
 AETHER_APP = AETHER_GRAPH.compile()
+
+
+# Compiling is cheap, but each checkpointer produces a different app: one with
+# no memory (the stateless inventory flow) and one per configured checkpointer
+# (the messenger's sessions). They are cached rather than rebuilt per call, and
+# dropped whenever the runtime configuration changes.
+_COMPILED: list[tuple[Any, Any]] = [(None, AETHER_APP)]
+
+
+def get_app(checkpointer: Any = None) -> Any:
+    """
+    Return the compiled graph for a given checkpointer, compiling it once.
+
+    Args:
+        checkpointer: A LangGraph checkpointer for conversation memory, or None
+            to fall back to the configured one (and to a memoryless app when
+            none is configured).
+
+    Returns:
+        Any: The compiled graph, ready to `.invoke()`.
+    """
+
+    checkpointer = RUNTIME.checkpointer if checkpointer is None else checkpointer
+
+    for known, app in _COMPILED:
+        if known is checkpointer:
+            return app
+
+    app = AETHER_GRAPH.compile(checkpointer=checkpointer)
+    _COMPILED.append((checkpointer, app))
+
+    return app
+
+
+def reset_app() -> None:
+    """Drop every compiled graph except the memoryless default."""
+
+    _COMPILED[:] = [(None, AETHER_APP)]
+
+
+RUNTIME.on_change(reset_app)

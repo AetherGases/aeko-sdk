@@ -1,6 +1,8 @@
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import HumanMessage
+from typing import Any, Sequence
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import MessagesState
 
 
@@ -57,13 +59,50 @@ class AetherGraphState(MessagesState):
     company_context: str
 
 
-def create_initial_state(initial_question: str, company_context: str = "") -> AetherGraphState:
+def history_to_messages(history: Sequence[Any] | None) -> list[BaseMessage]:
+    """
+    Convert caller-supplied conversation history into LangChain messages.
+
+    The SDK is consumed by an API that owns persistence, so a session may have
+    to be rebuilt from turns held elsewhere (a database, another worker). This
+    accepts both already-built messages and plain {"role", "content"} dicts.
+
+    Args:
+        history: Prior turns, oldest first, or None.
+
+    Returns:
+        list[BaseMessage]: The converted messages, in the same order.
+    """
+
+    if not history:
+        return []
+
+    messages: list[BaseMessage] = []
+    for turn in history:
+        if isinstance(turn, BaseMessage):
+            messages.append(turn)
+            continue
+
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        messages.append(
+            HumanMessage(content=content) if role in ("user", "human")
+            else AIMessage(content=content)
+        )
+
+    return messages
+
+
+def create_initial_state(initial_question: str, company_context: str = "",
+                         history: Sequence[Any] | None = None) -> AetherGraphState:
     """
     Build the initial graph state for a new conversation.
 
     Args:
-        initial_question: The user's opening question, seeded as the first message.
+        initial_question: The user's opening question, seeded as the last message.
         company_context: Optional context about the requesting company.
+        history: Optional prior turns to seed before the question, so a session
+            resumed from outside the process keeps its conversational context.
 
     Returns:
         AetherGraphState: A fully-populated initial state with empty defaults.
@@ -73,7 +112,7 @@ def create_initial_state(initial_question: str, company_context: str = "") -> Ae
     # in the class body is a dead class attribute, never applied to instances.
     # This factory is the only place defaults are actually populated.
     return AetherGraphState(
-        messages=[HumanMessage(content=initial_question)],
+        messages=[*history_to_messages(history), HumanMessage(content=initial_question)],
         initial_question=initial_question,
         previous_agents={},
         next_agent=None,

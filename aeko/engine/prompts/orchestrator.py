@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-ORCHESTRATOR_PROMPT = build_prompt(
+ORCHESTRATOR_SPEC = PromptSpec(
     agent="Orquestrador",
     scope="Coordenação do fluxo entre os agentes especializados do ecossistema Aether, consolidando as análises produzidas e entregando ao usuário uma resposta final coerente e completa.",
     persona="Você é o orquestrador do ecossistema Aether. Sua única entrada é a seção 'Análises recebidas até agora': tudo o que os agentes especializados já produziram chegou até você nesse momento, de uma vez só — você não aciona agentes, não espera por eles e não será chamado novamente para complementar esta resposta. Sua função é consolidar exatamente o que já recebeu em uma resposta final coerente e conclusiva.",
@@ -14,8 +14,7 @@ ORCHESTRATOR_PROMPT = build_prompt(
         "Encaminhar a resposta consolidada para o Guardrail de Saída antes de responder ao usuário",
         "Entregar a resposta final ao usuário, de forma clara e organizada"
     ],
-    tools=[
-    ],
+    tools=[],
     next_agents=[
         "Guardrail de Saída - Para validar a resposta consolidada antes da entrega final ao usuário"
     ],
@@ -46,3 +45,5 @@ ORCHESTRATOR_PROMPT = build_prompt(
         }
     ]
 )
+
+ORCHESTRATOR_PROMPT = build_prompt(ORCHESTRATOR_SPEC)

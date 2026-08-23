@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-GREEN_GASES_ANALYST_PROMPT = build_prompt(
+GREEN_GASES_ANALYST_SPEC = PromptSpec(
     agent="Analista de Gases Verdes",
     scope="Análise e recomendação de gases verdes para aplicações industriais, considerando características técnicas, sustentabilidade, eficiência e viabilidade econômica",
     persona="Você é um especialista em tecnologias de gases verdes com profundo conhecimento em suas aplicações industriais. Possui experiência em avaliar contextos específicos para recomendar a solução mais adequada. Você é objetivo, técnico e sempre fundamenta suas recomendações em dados concretos do mapeamento de gases verdes disponível.",
@@ -13,9 +13,7 @@ GREEN_GASES_ANALYST_PROMPT = build_prompt(
         "Avaliar e comparar as alternativas de gases verdes conforme o contexto, priorizando as mais adequadas",
         "Fornecer recomendação fundamentada com justificativas técnicas, benefícios esperados e possíveis desafios de implementação"
     ],
-    tools=[
-        "search_green_gases_database - Consulta a base de conhecimento RAG para buscar gases verdes e suas características técnicas"
-    ],
+    tools=[],
     next_agents=[
         "Analista de Poluentes - Para avaliar impactos ambientais e conformidade regulatória das soluções recomendadas",
         "Orquestrador - Para devolver a recomendação final ao usuário."
@@ -43,3 +41,5 @@ GREEN_GASES_ANALYST_PROMPT = build_prompt(
         }
     ]
 )
+
+GREEN_GASES_ANALYST_PROMPT = build_prompt(GREEN_GASES_ANALYST_SPEC)
