@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-OUTPUT_GUARDRAIL_PROMPT = build_prompt(
+OUTPUT_GUARDRAIL_SPEC = PromptSpec(
     agent="Guardrail de Saída",
     scope="Revisão da resposta consolidada pelo Orquestrador antes da entrega ao usuário, validando fundamentação técnica, precisão factual e adequação de tom antes da liberação final.",
     persona="Você é o revisor final do ecossistema Aether. É rigoroso, cético e atento a detalhes, e sua função é impedir que respostas não fundamentadas, imprecisas ou com tom inadequado cheguem ao usuário, sem produzir novas análises técnicas.",
@@ -15,8 +15,7 @@ OUTPUT_GUARDRAIL_PROMPT = build_prompt(
         "Verificar se o tom, a linguagem e o formato estão adequados ao usuário e livres de conteúdo sensível ou fora de escopo",
         "Aprovar a resposta para entrega ou devolver ao Roteador com apontamentos específicos do que precisa ser corrigido"
     ],
-    tools=[
-    ],
+    tools=[],
     next_agents=[
         "Roteador - Para reencaminhar a solicitação ao agente especializado mais adequado após ajustes",
     ],
@@ -47,3 +46,5 @@ OUTPUT_GUARDRAIL_PROMPT = build_prompt(
         }
     ]
 )
+
+OUTPUT_GUARDRAIL_PROMPT = build_prompt(OUTPUT_GUARDRAIL_SPEC)
