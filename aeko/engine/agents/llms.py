@@ -1,6 +1,6 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from system.engine.runtime import RUNTIME
+from aeko.engine.runtime import RUNTIME
 
 
 def create_llms(api_key: str | None = None, *, fast_model: str | None = None,

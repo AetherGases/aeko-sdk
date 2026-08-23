@@ -5,9 +5,9 @@ from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import MessagesPlaceholder
 
-from system.engine.agents.llms import create_llms
-from system.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
-from system.engine.runtime import RUNTIME
+from aeko.engine.agents.llms import create_llms
+from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
+from aeko.engine.runtime import RUNTIME
 
 # create_tool_calling_agent requires the prompt to reserve a slot for the
 # tool-call loop's scratchpad; the shared prompt specs don't have one.

@@ -3,9 +3,9 @@ from typing import Any, Callable
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from system.engine.graph.state import AetherGraphState, NextAgent
-from system.engine.agents.agents import create_agents
-from system.engine.runtime import RUNTIME
+from aeko.engine.graph.state import AetherGraphState, NextAgent
+from aeko.engine.agents.agents import create_agents
+from aeko.engine.runtime import RUNTIME
 
 # Agents used to be built at import time, which made `Aeko.config()` useless:
 # by the time the consuming API supplied its API key, the LLMs had already been
@@ -113,7 +113,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     Build an isolated handoff message from structured state, not raw history.
 
     Every agent's own prompt is designed (see its few-shot examples in
-    system/engine/prompts/) around a single self-contained human turn, never
+    aeko/engine/prompts/) around a single self-contained human turn, never
     around replaying another agent's raw output as chat history. Feeding an
     agent the accumulated `state["messages"]` would eventually end on another
     agent's "ai" turn, which Gemini silently answers with empty content, and

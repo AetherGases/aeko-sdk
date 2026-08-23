@@ -14,12 +14,12 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 
-from system.config.aeko import Aeko
-from system.config.messenger import AekoMessenger
-from system.engine.graph import nodes
+from aeko.config.aeko import Aeko
+from aeko.config.messenger import AekoMessenger
+from aeko.engine.graph import nodes
 
 # Every agent's system prompt states its identity in this exact shape (see
-# `_render_instructions` in system/engine/prompts/builder.py), which is what
+# `_render_instructions` in aeko/engine/prompts/builder.py), which is what
 # lets one fake model answer as whichever agent is calling it.
 PERSONA_MARKER = "Voce é o agente: "
 
@@ -162,7 +162,7 @@ def use_fake_llm(monkeypatch):
     def _use(responses: dict[str, str] | None = None, **kwargs: Any) -> FakeChatModel:
         fake = FakeChatModel(responses=responses or {}, **kwargs)
         monkeypatch.setattr(
-            "system.engine.agents.agents.create_llms", lambda *a, **k: (fake, fake)
+            "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fake, fake)
         )
         nodes.reset_agents()
         return fake

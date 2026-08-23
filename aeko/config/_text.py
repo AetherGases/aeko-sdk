@@ -6,7 +6,7 @@ def strip_routing_marker(text: str) -> str:
     Remove the agents' internal handoff marker from a user-facing answer.
 
     Every agent ends its output with a "Next agent: <name>" line, which is how
-    the graph routes (see `_invoke_agent` in system/engine/graph/nodes.py). The
+    the graph routes (see `_invoke_agent` in aeko/engine/graph/nodes.py). The
     graph stores that raw output verbatim, so the marker has to be stripped
     before the text is handed to whoever consumes the SDK — it is protocol
     between agents, not part of the answer.

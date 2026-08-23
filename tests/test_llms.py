@@ -6,10 +6,10 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from system.config.aeko import Aeko
-from system.config.exceptions import AekoNotConfiguredError
-from system.engine.agents.llms import create_llms
-from system.engine.runtime import DEFAULT_FAST_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_SLOW_MODEL
+from aeko.config.aeko import Aeko
+from aeko.config.exceptions import AekoNotConfiguredError
+from aeko.engine.agents.llms import create_llms
+from aeko.engine.runtime import DEFAULT_FAST_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_SLOW_MODEL
 
 API_KEY = "fake-api-key"
 

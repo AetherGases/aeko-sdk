@@ -2,13 +2,13 @@ from typing import Any, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from system.config._text import strip_routing_marker
-from system.config.dto import AekoTool, MessageResponse, SessionInfo
-from system.config.exceptions import SessionNotPreparedError, UnknownAgentError
-from system.engine.graph.builder import get_app
-from system.engine.graph.state import create_initial_state, history_to_messages
-from system.engine.prompts import AGENT_NAMES
-from system.engine.runtime import RUNTIME
+from aeko.config._text import strip_routing_marker
+from aeko.config.dto import AekoTool, MessageResponse, SessionInfo
+from aeko.config.exceptions import SessionNotPreparedError, UnknownAgentError
+from aeko.engine.graph.builder import get_app
+from aeko.engine.graph.state import create_initial_state, history_to_messages
+from aeko.engine.prompts import AGENT_NAMES
+from aeko.engine.runtime import RUNTIME
 
 
 def _final_answer(result: dict, seeded: int) -> str:
@@ -16,7 +16,7 @@ def _final_answer(result: dict, seeded: int) -> str:
     Extract the user-facing answer a run produced, if it produced one.
 
     Only terminal nodes and an approved guardrail append to "messages" (see
-    system/engine/graph/nodes.py). A run that ends without reaching any of them
+    aeko/engine/graph/nodes.py). A run that ends without reaching any of them
     — the guardrail rejecting past its retry cap — leaves "messages" exactly as
     it was seeded, and has no answer to report.
 
