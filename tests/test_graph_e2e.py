@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from system.engine.graph.builder import get_app
-from system.engine.graph.state import create_initial_state
+from aeko.engine.graph.builder import get_app
+from aeko.engine.graph.state import create_initial_state
 
 # Compatible with Aether's domain: GHG inventory / gas transition for industry (see
-# system/engine/prompts/router.py and report_analyst.py for similar examples).
+# aeko/engine/prompts/router.py and report_analyst.py for similar examples).
 INITIAL_QUESTION = (
     "Sou gestor ambiental de uma fabrica de ceramica e trouxe o inventario GHG de 2023: "
     "emissoes de CO2 dos fornos a gas natural (1.200 toneladas) e consumo de eletricidade "

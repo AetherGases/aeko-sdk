@@ -1,5 +1,5 @@
-from system.config.exceptions import AekoNotConfiguredError
-from system.engine.runtime import RUNTIME
+from aeko.config.exceptions import AekoNotConfiguredError
+from aeko.engine.runtime import RUNTIME
 
 
 class Aeko:

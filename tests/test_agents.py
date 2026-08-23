@@ -4,8 +4,8 @@ from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 
-from system.config.dto import AekoTool
-from system.engine.agents.agents import FAST_AGENTS, create_agents
+from aeko.config.dto import AekoTool
+from aeko.engine.agents.agents import FAST_AGENTS, create_agents
 
 from tests.conftest import PERSONA_MARKER
 
@@ -84,7 +84,7 @@ def test_agent_prompts_carry_their_own_persona(agents):
 
 
 def test_create_agents_requires_configuration():
-    from system.config.exceptions import AekoNotConfiguredError
+    from aeko.config.exceptions import AekoNotConfiguredError
 
     with pytest.raises(AekoNotConfiguredError):
         create_agents()
@@ -132,7 +132,7 @@ def test_specialists_get_the_slow_model_and_the_rest_the_fast_one(monkeypatch):
 
     fast, slow = FakeChatModel(model="fast"), FakeChatModel(model="slow")
     monkeypatch.setattr(
-        "system.engine.agents.agents.create_llms", lambda *a, **k: (fast, slow)
+        "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fast, slow)
     )
 
     agents = create_agents()

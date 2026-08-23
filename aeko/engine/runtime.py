@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:  # pragma: no cover - import kept out of runtime to avoid a
-    # cycle: system.config is the public facade built *on top of* this engine,
+    # cycle: aeko.config is the public facade built *on top of* this engine,
     # so the engine must never import it at module load time.
-    from system.config.dto import AekoTool
+    from aeko.config.dto import AekoTool
 
 DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_SLOW_MODEL = "gemini-3.5-flash"
@@ -61,7 +61,7 @@ class AekoRuntime:
 
         # Imported here (not at module level) for the same no-cycle reason as
         # the TYPE_CHECKING block above.
-        from system.config.exceptions import AekoNotConfiguredError
+        from aeko.config.exceptions import AekoNotConfiguredError
 
         if not self.api_key:
             raise AekoNotConfiguredError(

@@ -12,7 +12,7 @@ from .report_analyst import REPORT_ANALYST_PROMPT, REPORT_ANALYST_SPEC
 from .router import ROUTER_PROMPT, ROUTER_SPEC
 
 # Keyed by each spec's own `agent` field, which is exactly the name the graph
-# routes by (see system/engine/graph/builder.py) and the key `create_agents()`
+# routes by (see aeko/engine/graph/builder.py) and the key `create_agents()`
 # registers the agent under. Keeping a single source for that name is what lets
 # `AekoMessenger.set_tools()` accept agent names and reach the right prompt.
 PROMPT_SPECS: dict[str, PromptSpec] = {

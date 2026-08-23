@@ -1,8 +1,8 @@
-from system.config._text import strip_routing_marker
-from system.config.dto import InventoryAnalysisResponse
-from system.engine.graph.builder import get_app
-from system.engine.graph.state import create_initial_state
-from system.engine.runtime import RUNTIME
+from aeko.config._text import strip_routing_marker
+from aeko.config.dto import InventoryAnalysisResponse
+from aeko.engine.graph.builder import get_app
+from aeko.engine.graph.state import create_initial_state
+from aeko.engine.runtime import RUNTIME
 
 INVENTORY_ENTRY_POINT = "Análista de inventários"
 

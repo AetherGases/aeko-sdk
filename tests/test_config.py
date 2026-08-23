@@ -1,9 +1,9 @@
-"""Tests for the public SDK facade in system/config/."""
+"""Tests for the public SDK facade in aeko/config/."""
 
 import pytest
 from langchain_core.tools import tool
 
-from system import (
+from aeko import (
     Aeko,
     AekoInventoryAnalyzer,
     AekoMessenger,
@@ -12,12 +12,12 @@ from system import (
     MessageResponse,
     SessionInfo,
 )
-from system.config.exceptions import (
+from aeko.config.exceptions import (
     AekoNotConfiguredError,
     SessionNotPreparedError,
     UnknownAgentError,
 )
-from system.engine.runtime import (
+from aeko.engine.runtime import (
     DEFAULT_FAST_MODEL,
     DEFAULT_MAX_TOKENS,
     DEFAULT_REPORT_MAX_TOKENS,
@@ -130,7 +130,7 @@ def test_reset_clears_the_configuration():
 
 
 def test_reconfiguring_rebuilds_the_agents(configured, use_fake_llm):
-    from system.engine.graph import nodes
+    from aeko.engine.graph import nodes
 
     use_fake_llm(CHAT_FLOW)
     nodes._get_agents()
@@ -178,7 +178,7 @@ def test_set_tools_prefers_the_description_given_by_the_caller():
 
 
 def test_set_tools_is_global(configured, use_fake_llm):
-    from system.engine.graph import nodes
+    from aeko.engine.graph import nodes
 
     use_fake_llm(CHAT_FLOW)
     AekoMessenger().prepare("sess-tools", "Usuario")
@@ -397,7 +397,7 @@ def test_set_context_reaches_the_agents(configured, use_fake_llm):
 
 def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
     from tests.conftest import FakeChatModel
-    from system.engine.graph import nodes
+    from aeko.engine.graph import nodes
 
     caps = []
     fake = FakeChatModel(responses=INVENTORY_FLOW)
@@ -406,7 +406,7 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
         caps.append(kwargs.get("max_tokens"))
         return fake, fake
 
-    monkeypatch.setattr("system.engine.agents.agents.create_llms", _spy)
+    monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
     nodes.reset_agents()
 
     AekoInventoryAnalyzer().analyze(INVENTORY_MD)
@@ -418,7 +418,7 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
 
 def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch):
     from tests.conftest import FakeChatModel
-    from system.engine.graph import nodes
+    from aeko.engine.graph import nodes
 
     caps = []
     fake = FakeChatModel(responses=CHAT_FLOW)
@@ -427,7 +427,7 @@ def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch)
         caps.append(kwargs.get("max_tokens"))
         return fake, fake
 
-    monkeypatch.setattr("system.engine.agents.agents.create_llms", _spy)
+    monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
     nodes.reset_agents()
 
     instance = AekoMessenger()

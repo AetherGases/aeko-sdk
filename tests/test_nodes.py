@@ -1,7 +1,7 @@
 from langchain_core.messages import HumanMessage
 
-from system.engine.graph import nodes
-from system.engine.graph.state import create_initial_state
+from aeko.engine.graph import nodes
+from aeko.engine.graph.state import create_initial_state
 
 
 class _FakeAgent:
