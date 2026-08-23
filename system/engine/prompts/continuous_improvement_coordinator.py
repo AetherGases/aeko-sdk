@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-CONTINUOUS_IMPROVEMENT_COORDINATOR_PROMPT = build_prompt(
+CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC = PromptSpec(
     agent="Coordenador de Melhoria Contínua",
     scope="Análisde de processos industriais para otimização e redução de desperdícios a fim de gerar lucro para a empresa",
     persona="Você é um especialista em melhoria contínua e otimização de processos industriais, seu maior objetivo é gerar lucro para a empresa.",
@@ -13,9 +13,7 @@ CONTINUOUS_IMPROVEMENT_COORDINATOR_PROMPT = build_prompt(
         "Validar se os processos industriais ineficientes identificados podem ser otimizados com retorno monetário positivo para a empresa",
         "Desenvolver estratégias para implementar as melhorias identificadas"
     ],
-    tools=[
-        "web_search - Realiza consultas na web. Use quando precisar entender melhor alguma empresa ou padrões de processos industriais; pode usar para consultar preço médio de algumas melhorias."
-    ],
+    tools=[],
     next_agents=[
     ],
     shots=[
@@ -45,3 +43,5 @@ CONTINUOUS_IMPROVEMENT_COORDINATOR_PROMPT = build_prompt(
         }
     ]
 )
+
+CONTINUOUS_IMPROVEMENT_COORDINATOR_PROMPT = build_prompt(CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC)

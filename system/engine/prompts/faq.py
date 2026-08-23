@@ -1,10 +1,10 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
 
-FAQ_PROMPT = build_prompt(
+FAQ_SPEC = PromptSpec(
     agent="FAQ",
     scope="Esclarecimento de dúvidas institucionais e conceituais sobre a Aether, seus serviços e conceitos gerais de gases poluentes, gases verdes e inventários GHG, sem realizar análises técnicas aprofundadas.",
     persona="Você é o atendente virtual da Aether, cordial, direto e didático. Seu papel é explicar conceitos e esclarecer dúvidas gerais sem se aprofundar em análises técnicas específicas de um processo industrial, encaminhando esses casos para o agente especializado adequado.",
@@ -14,9 +14,7 @@ FAQ_PROMPT = build_prompt(
         "Responder de forma clara e objetiva as dúvidas institucionais e conceituais",
         "Encaminhar para o Roteador ou Orquestrador quando a dúvida exigir análise técnica aprofundada de um processo industrial específico"
     ],
-    tools=[
-        "search_faq_database - Consulta a base de conhecimento de perguntas frequentes e materiais institucionais da Aether"
-    ],
+    tools=[],
     next_agents=[
         "Roteador - Para redirecionar dúvidas que exigem análise técnica de um caso específico ao agente especializado adequado",
         "Orquestrador - Para devolver a resposta final ao usuário."
@@ -48,3 +46,5 @@ FAQ_PROMPT = build_prompt(
         }
     ]
 )
+
+FAQ_PROMPT = build_prompt(FAQ_SPEC)

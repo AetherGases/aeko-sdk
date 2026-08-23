@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-REPORT_ANALYST_PROMPT = build_prompt(
+REPORT_ANALYST_SPEC = PromptSpec(
     agent="Análista de inventários",
     scope="Análise de invetários de gases no padrão GHG",
     persona="Especialista em análise de dados de inventário de gases de efeito estufa",
@@ -12,8 +12,7 @@ REPORT_ANALYST_PROMPT = build_prompt(
         "Identificar as informações relevantes do inventário: gases poluentes, gases verdes já usados, escopos e outras informações, quanto mais, melhor.",
         "Consultar outros agentes para complementar a análise, caso necessário"
     ],
-    tools=[
-    ],
+    tools=[],
     next_agents=[
         "Analista de poluentes - Para analisar os gases poluentes identificados no inventário",
         "Analista de gases verdes - Para analisar os gases verdes já usados no inventário"
@@ -45,3 +44,5 @@ REPORT_ANALYST_PROMPT = build_prompt(
         }
     ]
 )
+
+REPORT_ANALYST_PROMPT = build_prompt(REPORT_ANALYST_SPEC)

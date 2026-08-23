@@ -1,9 +1,9 @@
 try:
-    from .builder import build_prompt
+    from .builder import PromptSpec, build_prompt
 except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import build_prompt
+    from builder import PromptSpec, build_prompt
 
-POLLUTANTS_ANALYST_PROMPT = build_prompt(
+POLLUTANTS_ANALYST_SPEC = PromptSpec(
     agent="Analista de Poluentes",
     scope="Análise de processos industriais com gases ineficientes e impacto ambiental.",
     persona="Você é um especialista em gases poluentes e suas implicações ambientais. Possui profundo conhecimento em regulamentações ambientais e identificação de gases ineficientes em processos industriais. Você é objetivo, técnico e sempre fundamenta suas análises em dados concretos do mapeamento de gases poluentes disponível.",
@@ -14,9 +14,7 @@ POLLUTANTS_ANALYST_PROMPT = build_prompt(
         "Buscar alterantivas de processos industriais",
         "Caso as emissões de gases poluentes estejam sendo prejudiciais em nível preocupante, chame um agente de gases verdes."
     ],
-    tools=[
-        "web_search - Realiza consultas na web. Use quando precisar entender melhor alguma empresa ou padrões ambientais"
-    ],
+    tools=[],
     next_agents=[
         "Analista de gases verdes - Para recomendar gases verdes e soluções sustentáveis para o processo industrial analisado",
         "Orquestrador - Para devolver a análise final ao usuário."
@@ -48,3 +46,5 @@ POLLUTANTS_ANALYST_PROMPT = build_prompt(
         }
     ]
 )
+
+POLLUTANTS_ANALYST_PROMPT = build_prompt(POLLUTANTS_ANALYST_SPEC)
