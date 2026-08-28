@@ -93,12 +93,11 @@ def test_configured_models_and_cap_are_honored():
     assert fast_llm.runnable.max_output_tokens == 4096
 
 
-def test_explicit_arguments_override_the_configuration():
+def test_the_report_token_cap_can_be_asked_for():
     Aeko.config(API_KEY)
 
-    fast_llm, _ = create_llms("outra-chave", fast_model="gemini-sob-medida", max_tokens=8192)
+    fast_llm, _ = create_llms(max_tokens=8192)
 
-    assert fast_llm.runnable.model.endswith("gemini-sob-medida")
     assert fast_llm.runnable.max_output_tokens == 8192
 
 

@@ -105,6 +105,9 @@ def test_build_graph_compiles():
     assert compiled is not None
 
 
-def test_aether_app_is_precompiled():
-    assert builder.AETHER_APP is not None
-    assert hasattr(builder.AETHER_APP, "invoke")
+def test_get_app_returns_an_invocable_graph():
+    app = builder.get_app()
+
+    assert app is not None
+    assert hasattr(app, "invoke")
+

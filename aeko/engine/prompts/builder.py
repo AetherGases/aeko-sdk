@@ -26,10 +26,6 @@ class PromptSpec:
     initial_context: str = DEFAULT_INITIAL_CONTEXT
 
 
-class IPrompt(PromptSpec):
-    """Backward compatibility with the previous prompt contract name."""
-
-
 def _current_datetime() -> str:
     """
     Format the current local time for the prompt's "Contexto Temporal" section.
@@ -78,12 +74,12 @@ def _render_instructions(prompt: PromptSpec) -> str:
 _SYSTEM_TEMPLATE = "{instructions}\n\n# Contexto Temporal\nData e hora atuais: {now}"
 
 
-def build_prompt(prompt: IPrompt | PromptSpec | None = None, **kwargs) -> ChatPromptTemplate:
+def build_prompt(prompt: PromptSpec | None = None, **kwargs) -> ChatPromptTemplate:
     """
     Build a chat prompt template for an agent from a PromptSpec (or its fields).
 
     Args:
-        prompt: A ready-made PromptSpec/IPrompt instance. Mutually exclusive with
+        prompt: A ready-made PromptSpec instance. Mutually exclusive with
             passing spec fields as keyword arguments.
         **kwargs: PromptSpec fields (agent, scope, persona, tasks, tools,
             next_agents, shots, initial_context) used to build a PromptSpec when
@@ -104,7 +100,7 @@ def build_prompt(prompt: IPrompt | PromptSpec | None = None, **kwargs) -> ChatPr
     elif kwargs:
         raise ValueError("Use either a prompt object or keyword arguments, not both.")
     elif not isinstance(prompt, PromptSpec):
-        raise TypeError("prompt must be a PromptSpec or IPrompt instance.")
+        raise TypeError("prompt must be a PromptSpec instance.")
 
     system_prompt = SystemMessagePromptTemplate.from_template(
         _SYSTEM_TEMPLATE,

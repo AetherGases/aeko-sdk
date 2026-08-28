@@ -105,9 +105,9 @@ def test_build_guardrail_message_includes_specialist_findings():
 # --- _invoke_agent --------------------------------------------------------
 
 
-def test_invoke_agent_sends_a_single_message_to_the_agent(monkeypatch):
+def test_invoke_agent_sends_a_single_message_to_the_agent(use_agents):
     fake_agent = _FakeAgent("Ok.\nNext agent: Nenhum")
-    monkeypatch.setattr(nodes, "_AGENTS", {"FAQ": fake_agent})
+    use_agents({"FAQ": fake_agent})
 
     message = HumanMessage(content="Oi")
     output, next_agent = nodes._invoke_agent("FAQ", message)
@@ -117,8 +117,8 @@ def test_invoke_agent_sends_a_single_message_to_the_agent(monkeypatch):
     assert next_agent is None
 
 
-def test_invoke_agent_parses_next_agent_marker(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_invoke_agent_parses_next_agent_marker(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Direcionando.\nNext agent: FAQ"),
         "FAQ": _FakeAgent("dummy"),
     })
@@ -128,8 +128,8 @@ def test_invoke_agent_parses_next_agent_marker(monkeypatch):
     assert next_agent == {"agent": "FAQ", "message": "Direcionando.\nNext agent: FAQ"}
 
 
-def test_invoke_agent_raises_for_unknown_agent_name(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_invoke_agent_raises_for_unknown_agent_name(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Direcionando.\nNext agent: Agente Inexistente"),
     })
 
@@ -143,8 +143,8 @@ def test_invoke_agent_raises_for_unknown_agent_name(monkeypatch):
 # --- _specialist_node_factory ---------------------------------------------
 
 
-def test_specialist_node_factory_is_non_terminal_by_default(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_specialist_node_factory_is_non_terminal_by_default(use_agents):
+    use_agents({
         "Analista de Poluentes": _FakeAgent("Analise concluida.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })
@@ -158,8 +158,8 @@ def test_specialist_node_factory_is_non_terminal_by_default(monkeypatch):
     assert "messages" not in result
 
 
-def test_specialist_node_factory_terminal_also_writes_messages(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_specialist_node_factory_terminal_also_writes_messages(use_agents):
+    use_agents({
         "Coordenador de Melhoria Contínua": _FakeAgent("Plano finalizado.\nNext agent: Nenhum"),
     })
 
@@ -174,8 +174,8 @@ def test_specialist_node_factory_terminal_also_writes_messages(monkeypatch):
     assert result["previous_agents"] == {"Coordenador de Melhoria Contínua": "Plano finalizado.\nNext agent: Nenhum"}
 
 
-def test_specialist_node_factory_returns_independent_closures(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_specialist_node_factory_returns_independent_closures(use_agents):
+    use_agents({
         "Analista de Poluentes": _FakeAgent("Analise A.\nNext agent: Nenhum"),
         "Analista de Gases Verdes": _FakeAgent("Analise B.\nNext agent: Nenhum"),
     })
@@ -197,8 +197,8 @@ def test_specialist_node_factory_returns_independent_closures(monkeypatch):
 # --- _non_specialist_node_factory ------------------------------------------
 
 
-def test_non_specialist_node_factory_is_non_terminal_by_default(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_non_specialist_node_factory_is_non_terminal_by_default(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Direcionando.\nNext agent: FAQ"),
         "FAQ": _FakeAgent("dummy"),
     })
@@ -212,9 +212,9 @@ def test_non_specialist_node_factory_is_non_terminal_by_default(monkeypatch):
     assert result["next_agent"] == {"agent": "FAQ", "message": "Direcionando.\nNext agent: FAQ"}
 
 
-def test_non_specialist_node_factory_terminal_writes_messages(monkeypatch):
+def test_non_specialist_node_factory_terminal_writes_messages(use_agents):
     fake_agent = _FakeAgent("Resposta direta ao usuario.\nNext agent: Nenhum")
-    monkeypatch.setattr(nodes, "_AGENTS", {"FAQ": fake_agent})
+    use_agents({"FAQ": fake_agent})
 
     node = nodes._non_specialist_node_factory("FAQ", terminal=True)
     result = node(_state_with())
@@ -230,8 +230,8 @@ def test_non_specialist_node_factory_terminal_writes_messages(monkeypatch):
 # --- _roteador_node ---------------------------------------------------------
 
 
-def test_roteador_node_overrides_premature_orquestrador_routing(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_roteador_node_overrides_premature_orquestrador_routing(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Only text.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })
@@ -244,8 +244,8 @@ def test_roteador_node_overrides_premature_orquestrador_routing(monkeypatch):
     }
 
 
-def test_roteador_node_allows_orquestrador_when_previous_agents_exist(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_roteador_node_allows_orquestrador_when_previous_agents_exist(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Direcionando.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })
@@ -256,8 +256,8 @@ def test_roteador_node_allows_orquestrador_when_previous_agents_exist(monkeypatc
     assert result["next_agent"] == {"agent": "Orquestrador", "message": "Direcionando.\nNext agent: Orquestrador"}
 
 
-def test_roteador_node_never_writes_messages(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_roteador_node_never_writes_messages(use_agents):
+    use_agents({
         "FAQ": _FakeAgent("dummy"),
         "Roteador": _FakeAgent("Direcionando.\nNext agent: FAQ"),
     })
@@ -268,8 +268,8 @@ def test_roteador_node_never_writes_messages(monkeypatch):
     assert "previous_agents" not in result
 
 
-def test_next_agent_is_none_when_marker_absent(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_next_agent_is_none_when_marker_absent(use_agents):
+    use_agents({
         "FAQ": _FakeAgent("Resposta sem marcador de proximo agente."),
     })
 
@@ -279,8 +279,8 @@ def test_next_agent_is_none_when_marker_absent(monkeypatch):
     assert result["next_agent"] is None
 
 
-def test_next_agent_is_none_when_nenhum(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_next_agent_is_none_when_nenhum(use_agents):
+    use_agents({
         "Coordenador de Melhoria Contínua": _FakeAgent("Plano finalizado.\nNext agent: Nenhum"),
     })
 
@@ -290,8 +290,8 @@ def test_next_agent_is_none_when_nenhum(monkeypatch):
     assert result["next_agent"] is None
 
 
-def test_next_agent_raises_for_unknown_agent_name(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_next_agent_raises_for_unknown_agent_name(use_agents):
+    use_agents({
         "Roteador": _FakeAgent("Direcionando.\nNext agent: Agente Inexistente"),
     })
 
@@ -304,9 +304,9 @@ def test_next_agent_raises_for_unknown_agent_name(monkeypatch):
         pass
 
 
-def test_faq_node_sends_a_message_built_from_the_initial_question(monkeypatch):
+def test_faq_node_sends_a_message_built_from_the_initial_question(use_agents):
     fake_agent = _FakeAgent("Ok.\nNext agent: Nenhum")
-    monkeypatch.setattr(nodes, "_AGENTS", {"FAQ": fake_agent})
+    use_agents({"FAQ": fake_agent})
 
     node = nodes._non_specialist_node_factory("FAQ", terminal=True)
     state = create_initial_state("Oi, tudo bem?")
@@ -318,9 +318,9 @@ def test_faq_node_sends_a_message_built_from_the_initial_question(monkeypatch):
 # --- _orquestrador_node -----------------------------------------------------
 
 
-def test_orquestrador_node_records_draft_in_previous_agents_not_messages(monkeypatch):
+def test_orquestrador_node_records_draft_in_previous_agents_not_messages(use_agents):
     fake_agent = _FakeAgent("Resposta consolidada.\nNext agent: Guardrail de Saída")
-    monkeypatch.setattr(nodes, "_AGENTS", {
+    use_agents({
         "Orquestrador": fake_agent,
         "Guardrail de Saída": _FakeAgent("dummy"),
     })
@@ -335,9 +335,9 @@ def test_orquestrador_node_records_draft_in_previous_agents_not_messages(monkeyp
     }
 
 
-def test_orquestrador_node_uses_previous_agents_findings_as_context(monkeypatch):
+def test_orquestrador_node_uses_previous_agents_findings_as_context(use_agents):
     fake_agent = _FakeAgent("dummy.\nNext agent: Nenhum")
-    monkeypatch.setattr(nodes, "_AGENTS", {"Orquestrador": fake_agent})
+    use_agents({"Orquestrador": fake_agent})
 
     state = _state_with(previous_agents={"Analista de Poluentes": "Emissoes criticas."})
     nodes._orquestrador_node(state)
@@ -350,8 +350,8 @@ def test_orquestrador_node_uses_previous_agents_findings_as_context(monkeypatch)
 # --- _guardrail_node ---------------------------------------------------------
 
 
-def test_guardrail_node_promotes_orquestrador_draft_on_approval(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_guardrail_node_promotes_orquestrador_draft_on_approval(use_agents):
+    use_agents({
         "Guardrail de Saída": _FakeAgent("Aprovado. Tudo certo.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })
@@ -369,8 +369,8 @@ def test_guardrail_node_promotes_orquestrador_draft_on_approval(monkeypatch):
     assert "guard_rail_retries" not in result
 
 
-def test_guardrail_node_does_not_touch_messages_on_rejection(monkeypatch):
-    monkeypatch.setattr(nodes, "_AGENTS", {
+def test_guardrail_node_does_not_touch_messages_on_rejection(use_agents):
+    use_agents({
         "Guardrail de Saída": _FakeAgent("Reprovado. Falta fundamentacao.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })

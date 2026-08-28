@@ -130,15 +130,54 @@ def test_reset_clears_the_configuration():
 
 
 def test_reconfiguring_rebuilds_the_agents(configured, use_fake_llm):
-    from aeko.engine.graph import nodes
-
     use_fake_llm(CHAT_FLOW)
-    nodes._get_agents()
-    assert nodes._AGENT_CACHE, "os agentes deveriam ter sido construidos"
+    RUNTIME.agents_for()
+    assert RUNTIME.agents, "os agentes deveriam ter sido construidos"
 
     Aeko.config("outra-chave")
 
-    assert not nodes._AGENT_CACHE, "reconfigurar precisa invalidar os agentes em cache"
+    assert not RUNTIME.agents, "reconfigurar precisa invalidar os agentes em cache"
+
+
+def test_configuring_any_setting_invalidates_the_agents(configured, use_fake_llm):
+    use_fake_llm(CHAT_FLOW)
+    RUNTIME.agents_for()
+
+    RUNTIME.configure(slow_model="outro-lento")
+
+    assert not RUNTIME.agents, "o RUNTIME e a unica fonte: reconfigura-lo invalida os agentes"
+
+
+def test_assigning_a_setting_directly_also_invalidates_the_agents(configured, use_fake_llm):
+    use_fake_llm(CHAT_FLOW)
+    RUNTIME.agents_for()
+
+    RUNTIME.slow_model = "outro-lento"
+
+    assert not RUNTIME.agents, "a invalidacao vale para qualquer escrita, nao so via configure()"
+
+
+def test_configure_rejects_an_unknown_setting():
+    with pytest.raises(AttributeError):
+        RUNTIME.configure(modelo_rapido="rapido")
+
+
+def test_agents_are_built_once_per_token_cap(configured, use_fake_llm):
+    use_fake_llm(CHAT_FLOW)
+
+    conversational = RUNTIME.agents_for()
+
+    assert RUNTIME.agents_for() is conversational, "o mesmo teto reaproveita os agentes"
+    assert RUNTIME.agents_for(RUNTIME.report_max_tokens) is not conversational
+    assert set(RUNTIME.agents) == {RUNTIME.max_tokens, RUNTIME.report_max_tokens}
+
+
+def test_agents_for_defaults_to_the_conversational_cap(configured, use_fake_llm):
+    use_fake_llm(CHAT_FLOW)
+
+    RUNTIME.agents_for()
+
+    assert list(RUNTIME.agents) == [DEFAULT_MAX_TOKENS]
 
 
 # --- set_tools -----------------------------------------------------------
@@ -147,8 +186,8 @@ def test_reconfiguring_rebuilds_the_agents(configured, use_fake_llm):
 def test_set_tools_registers_tools_per_agent():
     AekoMessenger.set_tools({"FAQ": [AekoTool(tool=consulta_precos, description="Consulta.")]})
 
-    assert [t.name for t in RUNTIME.tools_for("FAQ")] == ["consulta_precos"]
-    assert RUNTIME.tools_for("Roteador") == []
+    assert [t.name for t in RUNTIME.tools["FAQ"]] == ["consulta_precos"]
+    assert "Roteador" not in RUNTIME.tools
 
 
 def test_set_tools_rejects_an_unknown_agent():
@@ -161,7 +200,7 @@ def test_set_tools_rejects_an_unknown_agent():
 def test_set_tools_normalizes_bare_tools():
     AekoMessenger.set_tools({"FAQ": [consulta_precos]})
 
-    registered = RUNTIME.tools_for("FAQ")[0]
+    registered = RUNTIME.tools["FAQ"][0]
 
     assert isinstance(registered, AekoTool)
     assert registered.to_prompt_line() == "consulta_precos - Descricao que a propria tool declara."
@@ -172,22 +211,20 @@ def test_set_tools_prefers_the_description_given_by_the_caller():
         "FAQ": [AekoTool(tool=consulta_precos, description="Consulta o preco medio.")],
     })
 
-    assert RUNTIME.tools_for("FAQ")[0].to_prompt_line() == (
+    assert RUNTIME.tools["FAQ"][0].to_prompt_line() == (
         "consulta_precos - Consulta o preco medio."
     )
 
 
 def test_set_tools_is_global(configured, use_fake_llm):
-    from aeko.engine.graph import nodes
-
     use_fake_llm(CHAT_FLOW)
     AekoMessenger().prepare("sess-tools", "Usuario")
-    nodes._get_agents()
+    RUNTIME.agents_for()
 
     AekoMessenger.set_tools({"FAQ": [consulta_precos]})
 
-    assert not nodes._AGENT_CACHE, "registrar tools precisa invalidar os agentes em cache"
-    assert RUNTIME.tools_for("FAQ"), "as tools valem para o processo, nao para uma instancia"
+    assert not RUNTIME.agents, "registrar tools precisa invalidar os agentes em cache"
+    assert RUNTIME.tools["FAQ"], "as tools valem para o processo, nao para uma instancia"
 
 
 def test_registered_tools_reach_the_agent_that_answers(messenger):
@@ -397,7 +434,6 @@ def test_set_context_reaches_the_agents(configured, use_fake_llm):
 
 def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
     from tests.conftest import FakeChatModel
-    from aeko.engine.graph import nodes
 
     caps = []
     fake = FakeChatModel(responses=INVENTORY_FLOW)
@@ -407,18 +443,16 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
         return fake, fake
 
     monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
-    nodes.reset_agents()
+    RUNTIME.agents.clear()
 
     AekoInventoryAnalyzer().analyze(INVENTORY_MD)
 
     assert caps == [DEFAULT_REPORT_MAX_TOKENS]
-
-    nodes.reset_agents()
+    assert list(RUNTIME.agents) == [DEFAULT_REPORT_MAX_TOKENS]
 
 
 def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch):
     from tests.conftest import FakeChatModel
-    from aeko.engine.graph import nodes
 
     caps = []
     fake = FakeChatModel(responses=CHAT_FLOW)
@@ -428,12 +462,13 @@ def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch)
         return fake, fake
 
     monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
-    nodes.reset_agents()
+    RUNTIME.agents.clear()
 
     instance = AekoMessenger()
     instance.prepare("sess-cap", "Gestor")
     instance.send_message("O que e hidrogenio verde?")
 
-    assert caps == [None], "o fluxo conversacional usa o teto padrao, nao o de relatorio"
-
-    nodes.reset_agents()
+    assert caps == [DEFAULT_MAX_TOKENS], (
+        "o fluxo conversacional usa o teto padrao, nao o de relatorio"
+    )
+    assert list(RUNTIME.agents) == [DEFAULT_MAX_TOKENS]

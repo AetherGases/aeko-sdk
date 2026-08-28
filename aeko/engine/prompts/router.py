@@ -1,7 +1,4 @@
-try:
-    from .builder import PromptSpec, build_prompt
-except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import PromptSpec, build_prompt
+from .builder import PromptSpec
 
 
 ROUTER_SPEC = PromptSpec(
@@ -50,5 +47,3 @@ ROUTER_SPEC = PromptSpec(
         }
     ]
 )
-
-ROUTER_PROMPT = build_prompt(ROUTER_SPEC)

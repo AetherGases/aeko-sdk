@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from dataclasses import MISSING, dataclass, field, fields
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - import kept out of runtime to avoid a
     # cycle: aeko.config is the public facade built *on top of* this engine,
@@ -20,12 +20,12 @@ DEFAULT_REPORT_MAX_TOKENS = 8192
 @dataclass
 class AekoRuntime:
     """
-    Process-wide configuration for the agent system.
+    The single place the whole SDK reads its configuration from.
 
-    Holds everything `Aeko.config()` and `AekoMessenger.set_tools()` set, and
-    notifies its listeners whenever that changes so caches built from it (the
-    agent registry, the compiled graph) can be rebuilt instead of silently
-    serving objects made with stale settings.
+    Everything `Aeko.config()` and `AekoMessenger.set_tools()` set lives here,
+    and so does the one thing derived from it: the agent registry, built on
+    first use and dropped the moment any setting is written, so a run can never
+    be served agents made with stale settings.
 
     Attributes:
         api_key: The Gemini API key. There is no environment fallback: it must
@@ -35,7 +35,8 @@ class AekoRuntime:
         max_tokens: Output cap for the conversational flow.
         report_max_tokens: Output cap for the inventory report flow.
         tools: Agent name to the tools registered for it.
-        checkpointer: Optional LangGraph checkpointer for conversation memory.
+        agents: Derived, not a setting: the agent registry, keyed by the output
+            token cap it was built with. Populated by `agents_for()`.
     """
 
     api_key: str | None = None
@@ -44,9 +45,54 @@ class AekoRuntime:
     max_tokens: int = DEFAULT_MAX_TOKENS
     report_max_tokens: int = DEFAULT_REPORT_MAX_TOKENS
     tools: dict[str, list["AekoTool"]] = field(default_factory=dict)
-    checkpointer: Any = None
 
-    _listeners: list[Callable[[], None]] = field(default_factory=list, repr=False)
+    agents: dict[int, dict[str, Any]] = field(default_factory=dict, repr=False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """
+        Set a field and, unless it is the derived registry, invalidate it.
+
+        The agents are built from these settings, so writing any of them — from
+        `Aeko.config()`, from `set_tools()`, or directly — drops them. Doing it
+        here rather than in `configure()` is what makes the invalidation an
+        invariant instead of a convention nobody can be made to follow.
+
+        Args:
+            name: The field being set.
+            value: Its new value.
+        """
+
+        super().__setattr__(name, value)
+
+        if name != "agents":
+            # `agents` does not exist yet while __init__ sets the settings.
+            (self.__dict__.get("agents") or {}).clear()
+
+    def configure(self, **settings: Any) -> None:
+        """
+        Apply the given settings, ignoring the ones left as None.
+
+        A convenience over plain assignment, not a requirement for it: the
+        invalidation lives in `__setattr__`, so a direct write is just as safe.
+        What this adds is skipping None values and rejecting unknown names.
+
+        Args:
+            **settings: Setting name to its new value. A None value means "keep
+                whatever is configured", which is how the optional overrides in
+                `Aeko.config()` stay optional.
+
+        Raises:
+            AttributeError: If a name is not one of the runtime's settings.
+        """
+
+        settable = {spec.name for spec in fields(self)} - {"agents"}
+
+        for name, value in settings.items():
+            if name not in settable:
+                raise AttributeError(f"{name!r} is not a setting of AekoRuntime.")
+
+            if value is not None:
+                setattr(self, name, value)
 
     def require_api_key(self) -> str:
         """
@@ -70,46 +116,50 @@ class AekoRuntime:
 
         return self.api_key
 
-    def tools_for(self, agent: str) -> list["AekoTool"]:
+    def agents_for(self, max_tokens: int | None = None) -> dict[str, Any]:
         """
-        Return the tools registered for one agent.
+        Return the agent registry for an output token cap, building it once.
+
+        The registry is keyed by the cap because that is the only setting a
+        single run may deviate from: the inventory flow needs `report_max_tokens`
+        where a chat turn needs `max_tokens`, and they cannot share agents.
 
         Args:
-            agent: The agent's name, as used by the graph.
+            max_tokens: The cap the agents should be built with, or None for the
+                configured conversational one.
 
         Returns:
-            list[AekoTool]: Its tools, or an empty list when none were set.
+            dict[str, Any]: The agents, keyed by the names the graph routes by.
+
+        Raises:
+            AekoNotConfiguredError: If `Aeko.config()` was never called.
         """
 
-        return self.tools.get(agent, [])
+        # Imported here (not at module level) for the same no-cycle reason as
+        # the TYPE_CHECKING block above.
+        from aeko.engine.agents.agents import create_agents
 
-    def on_change(self, listener: Callable[[], None]) -> None:
-        """
-        Register a callback invoked whenever the configuration changes.
+        max_tokens = max_tokens or self.max_tokens
 
-        Args:
-            listener: A zero-argument callable, typically a cache invalidator.
-        """
+        if max_tokens not in self.agents:
+            self.agents[max_tokens] = create_agents(max_tokens=max_tokens)
 
-        self._listeners.append(listener)
-
-    def notify_changed(self) -> None:
-        """Invoke every registered listener, invalidating derived caches."""
-
-        for listener in self._listeners:
-            listener()
+        return self.agents[max_tokens]
 
     def reset(self) -> None:
-        """Restore every default, clear registered tools, and invalidate caches."""
+        """Restore every default, clear registered tools, and drop the agents."""
 
-        self.api_key = None
-        self.fast_model = DEFAULT_FAST_MODEL
-        self.slow_model = DEFAULT_SLOW_MODEL
-        self.max_tokens = DEFAULT_MAX_TOKENS
-        self.report_max_tokens = DEFAULT_REPORT_MAX_TOKENS
-        self.tools = {}
-        self.checkpointer = None
-        self.notify_changed()
+        # Not `configure()`: it skips None values, and None is the default the
+        # api_key has to go back to. Each `setattr` drops the agents on its own.
+        for spec in fields(self):
+            if spec.name == "agents":
+                continue
+
+            setattr(
+                self,
+                spec.name,
+                spec.default_factory() if spec.default is MISSING else spec.default,
+            )
 
 
 RUNTIME = AekoRuntime()

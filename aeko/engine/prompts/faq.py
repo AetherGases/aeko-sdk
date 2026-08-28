@@ -1,7 +1,4 @@
-try:
-    from .builder import PromptSpec, build_prompt
-except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import PromptSpec, build_prompt
+from .builder import PromptSpec
 
 
 FAQ_SPEC = PromptSpec(
@@ -46,5 +43,3 @@ FAQ_SPEC = PromptSpec(
         }
     ]
 )
-
-FAQ_PROMPT = build_prompt(FAQ_SPEC)

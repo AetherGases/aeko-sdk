@@ -16,7 +16,7 @@ from langchain_core.runnables import Runnable
 
 from aeko.config.aeko import Aeko
 from aeko.config.messenger import AekoMessenger
-from aeko.engine.graph import nodes
+from aeko.engine.runtime import RUNTIME
 
 # Every agent's system prompt states its identity in this exact shape (see
 # `_render_instructions` in aeko/engine/prompts/builder.py), which is what
@@ -137,7 +137,11 @@ class FakeChatModel(BaseChatModel):
 
 @pytest.fixture(autouse=True)
 def reset_aeko():
-    """Keep configuration, tools and sessions from leaking between tests."""
+    """Keep configuration, tools and sessions from leaking between tests.
+
+    `Aeko.reset()` also drops `RUNTIME.agents`, so no test inherits agents
+    another one built (or faked).
+    """
 
     Aeko.reset()
     AekoMessenger._sessions.clear()
@@ -164,9 +168,30 @@ def use_fake_llm(monkeypatch):
         monkeypatch.setattr(
             "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fake, fake)
         )
-        nodes.reset_agents()
+        RUNTIME.agents.clear()
         return fake
 
     yield _use
 
-    nodes.reset_agents()
+    RUNTIME.agents.clear()
+
+
+@pytest.fixture
+def use_agents():
+    """
+    Install ready-made agent doubles as the registry the nodes will read.
+
+    Seeds `RUNTIME.agents` under the configured conversational cap, which is the
+    key `_invoke_agent` resolves to when a run opts into no cap of its own. The
+    autouse `reset_aeko` fixture clears it again afterwards.
+
+    Returns:
+        Callable[[dict[str, Any]], dict[str, Any]]: Installs the agents and
+            returns them.
+    """
+
+    def _use(agents: dict[str, Any]) -> dict[str, Any]:
+        RUNTIME.agents[RUNTIME.max_tokens] = agents
+        return agents
+
+    return _use
