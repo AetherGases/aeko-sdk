@@ -75,38 +75,32 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Agen
     return AgentExecutor(agent=tool_calling_agent, tools=lc_tools)
 
 
-def create_agents(tools: dict[str, list[Any]] | None = None, *, api_key: str | None = None,
-                  fast_model: str | None = None, slow_model: str | None = None,
-                  max_tokens: int | None = None) -> dict[str, Any]:
+def create_agents(max_tokens: int | None = None) -> dict[str, Any]:
     """
     Create every agent of the system, wiring each one to its registered tools.
 
+    Both the tools and the credentials come from the runtime, which is the only
+    place they are configured (see `AekoMessenger.set_tools()` and
+    `Aeko.config()`).
+
     Args:
-        tools: Agent name to its tools. Defaults to whatever was registered
-            through `AekoMessenger.set_tools()`.
-        api_key: Overrides the configured Gemini API key.
-        fast_model: Overrides the configured fast model id.
-        slow_model: Overrides the configured slow model id.
-        max_tokens: Overrides the configured output token cap — this is how the
-            inventory report flow gets more room than a chat answer.
+        max_tokens: The output token cap the agents are built with. Defaults to
+            the configured conversational one — this is how the inventory report
+            flow gets more room than a chat answer.
 
     Returns:
         dict[str, AgentExecutor]: The agents, keyed by the exact names the graph
             routes by.
 
     Raises:
-        AekoNotConfiguredError: If no API key was given or configured.
+        AekoNotConfiguredError: If no API key was configured.
     """
 
-    tools = RUNTIME.tools if tools is None else tools
-
-    fast_llm, slow_llm = create_llms(
-        api_key, fast_model=fast_model, slow_model=slow_model, max_tokens=max_tokens
-    )
+    fast_llm, slow_llm = create_llms(max_tokens=max_tokens)
 
     return {
         name: _build_agent(
-            fast_llm if name in FAST_AGENTS else slow_llm, spec, tools.get(name, [])
+            fast_llm if name in FAST_AGENTS else slow_llm, spec, RUNTIME.tools.get(name, [])
         )
         for name, spec in PROMPT_SPECS.items()
     }

@@ -1,7 +1,4 @@
-try:
-    from .builder import PromptSpec, build_prompt
-except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import PromptSpec, build_prompt
+from .builder import PromptSpec
 
 GREEN_GASES_ANALYST_SPEC = PromptSpec(
     agent="Analista de Gases Verdes",
@@ -41,5 +38,3 @@ GREEN_GASES_ANALYST_SPEC = PromptSpec(
         }
     ]
 )
-
-GREEN_GASES_ANALYST_PROMPT = build_prompt(GREEN_GASES_ANALYST_SPEC)

@@ -1,7 +1,4 @@
-try:
-    from .builder import PromptSpec, build_prompt
-except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import PromptSpec, build_prompt
+from .builder import PromptSpec
 
 ORCHESTRATOR_SPEC = PromptSpec(
     agent="Orquestrador",
@@ -45,5 +42,3 @@ ORCHESTRATOR_SPEC = PromptSpec(
         }
     ]
 )
-
-ORCHESTRATOR_PROMPT = build_prompt(ORCHESTRATOR_SPEC)

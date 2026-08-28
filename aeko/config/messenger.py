@@ -107,8 +107,7 @@ class AekoMessenger:
 
             normalized[agent] = [AekoTool.wrap(tool) for tool in agent_tools]
 
-        RUNTIME.tools = normalized
-        RUNTIME.notify_changed()
+        RUNTIME.configure(tools=normalized)
 
     def prepare(self, session_id: str, user_info: str,
                 history: Sequence[Any] | None = None) -> SessionInfo:

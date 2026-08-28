@@ -1,57 +1,13 @@
-from typing import Any, Callable
+from typing import Callable
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from aeko.engine.graph.state import AetherGraphState, NextAgent
-from aeko.engine.agents.agents import create_agents
 from aeko.engine.runtime import RUNTIME
 
-# Agents used to be built at import time, which made `Aeko.config()` useless:
-# by the time the consuming API supplied its API key, the LLMs had already been
-# instantiated without one. They are now built on first use and rebuilt whenever
-# the runtime configuration changes.
-#
-# `_AGENTS` stays a module-level dict so it can still be swapped wholesale in
-# tests; when it is non-empty, it wins over the lazily built registry.
-_AGENTS: dict[str, Any] = {}
 
-# Keyed by output token cap: the conversational flow and the inventory report
-# flow share the same agents but not the same room to answer.
-_AGENT_CACHE: dict[int | None, dict[str, Any]] = {}
-
-
-def _get_agents(max_tokens: int | None = None) -> dict[str, Any]:
-    """
-    Return the agent registry for a given output token cap, building it once.
-
-    Args:
-        max_tokens: The output cap the agents should be built with, or None for
-            the configured default.
-
-    Returns:
-        dict[str, Any]: The agents, keyed by the names the graph routes by.
-    """
-
-    if _AGENTS:
-        return _AGENTS
-
-    if max_tokens not in _AGENT_CACHE:
-        _AGENT_CACHE[max_tokens] = create_agents(max_tokens=max_tokens)
-
-    return _AGENT_CACHE[max_tokens]
-
-
-def reset_agents() -> None:
-    """Drop every cached agent, so the next run rebuilds them from the runtime."""
-
-    _AGENT_CACHE.clear()
-
-
-RUNTIME.on_change(reset_agents)
-
-
-def _max_tokens_from(config: RunnableConfig | None) -> int | None:
+def _max_tokens_from(config: RunnableConfig | None) -> int:
     """
     Read the output token cap a run opted into.
 
@@ -59,10 +15,10 @@ def _max_tokens_from(config: RunnableConfig | None) -> int | None:
         config: The run's configuration, optionally carrying a "max_tokens".
 
     Returns:
-        int | None: The requested cap, or None to use the configured default.
+        int: The requested cap, or the configured conversational one.
     """
 
-    return (config or {}).get("configurable", {}).get("max_tokens")
+    return (config or {}).get("configurable", {}).get("max_tokens") or RUNTIME.max_tokens
 
 
 # How many prior messages of the conversation are replayed to an agent as
@@ -202,7 +158,7 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
     Invoke a named agent with a single isolated message and parse its routing decision.
 
     Args:
-        agent_name: The key of the agent to invoke in `_AGENTS`.
+        agent_name: The name of the agent to invoke, as registered in `RUNTIME.agents`.
         message: The isolated handoff message built for this agent.
         max_tokens: The output token cap this run opted into.
 
@@ -214,7 +170,7 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
         ValueError: If the agent's output names a next agent that doesn't exist.
     """
 
-    agents = _get_agents(max_tokens)
+    agents = RUNTIME.agents_for(max_tokens)
 
     output = agents[agent_name].invoke({"messages": [message]})["output"]
 
