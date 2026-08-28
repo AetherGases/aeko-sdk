@@ -157,6 +157,33 @@ def test_assigning_a_setting_directly_also_invalidates_the_agents(configured, us
     assert not RUNTIME.agents, "a invalidacao vale para qualquer escrita, nao so via configure()"
 
 
+class _ClearedRightAfterWrite(dict):
+    """
+    Registro que se esvazia logo apos ser escrito.
+
+    Reproduz de forma deterministica a janela concorrente real: outro thread
+    escreve no runtime (o que dispara `agents.clear()`) entre o momento em que
+    `agents_for()` guarda os agentes recem-construidos e o momento em que os
+    devolve.
+    """
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.clear()
+
+
+def test_agents_for_survives_an_invalidation_right_after_the_build(configured, use_fake_llm,
+                                                                   monkeypatch):
+    use_fake_llm(CHAT_FLOW)
+    # monkeypatch para o registro voltar a ser um dict comum depois do teste.
+    monkeypatch.setattr(RUNTIME, "agents", _ClearedRightAfterWrite())
+
+    agents = RUNTIME.agents_for()
+
+    assert agents, "perder a corrida custa uma reconstrucao, nao um KeyError"
+    assert not RUNTIME.agents, "a invalidacao concorrente continua valendo"
+
+
 def test_configure_rejects_an_unknown_setting():
     with pytest.raises(AttributeError):
         RUNTIME.configure(modelo_rapido="rapido")

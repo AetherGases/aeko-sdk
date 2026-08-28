@@ -141,10 +141,17 @@ class AekoRuntime:
 
         max_tokens = max_tokens or self.max_tokens
 
-        if max_tokens not in self.agents:
-            self.agents[max_tokens] = create_agents(max_tokens=max_tokens)
+        # Read into a local before returning: a concurrent write to any setting
+        # empties `agents` (see __setattr__), and indexing it again on the way
+        # out would raise KeyError if that landed in between. Losing the race
+        # this way only costs a rebuild the next call.
+        agents = self.agents.get(max_tokens)
 
-        return self.agents[max_tokens]
+        if agents is None:
+            agents = create_agents(max_tokens=max_tokens)
+            self.agents[max_tokens] = agents
+
+        return agents
 
     def reset(self) -> None:
         """Restore every default, clear registered tools, and drop the agents."""
