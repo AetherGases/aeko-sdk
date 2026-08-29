@@ -1,7 +1,7 @@
 import json
 
 from aeko.config._text import strip_routing_marker
-from aeko.config.dto import ImprovementPlan
+from aeko.config.dto import AekoImprovementPlan
 from aeko.config.exceptions import MalformedAgentOutputError
 from aeko.engine.graph.builder import get_app
 from aeko.engine.graph.state import create_initial_state
@@ -11,7 +11,7 @@ INVENTORY_ENTRY_POINT = "Análista de inventários"
 
 # The fields the continuous improvement coordinator is instructed to answer
 # with, and the only ones read back from it. Everything else an
-# `ImprovementPlan` carries — `_id`, `updated_at` — belongs to the database and
+# `AekoImprovementPlan` carries — `_id`, `updated_at` — belongs to the database and
 # to this SDK respectively, so the model is never given a say in them.
 PLAN_FIELDS = ("defined_problem", "method", "reasoning")
 
@@ -58,7 +58,7 @@ def _json_object_in(answer: str) -> dict:
     return payload
 
 
-def _to_improvement_plan(answer: str, id_external_inventory: int) -> ImprovementPlan:
+def _to_improvement_plan(answer: str, id_external_inventory: int) -> AekoImprovementPlan:
     """
     Turn the coordinator's answer into the document the API will persist.
 
@@ -72,7 +72,7 @@ def _to_improvement_plan(answer: str, id_external_inventory: int) -> Improvement
         id_external_inventory: The analyzed inventory's id in the platform.
 
     Returns:
-        ImprovementPlan: The plan, ready to be written to "improvement_plan".
+        AekoImprovementPlan: The plan, ready to be written to "improvement_plan".
 
     Raises:
         MalformedAgentOutputError: If the answer isn't the requested JSON object,
@@ -91,7 +91,7 @@ def _to_improvement_plan(answer: str, id_external_inventory: int) -> Improvement
             "O plano de melhoria retornado não preencheu: " + ", ".join(missing)
         )
 
-    return ImprovementPlan(
+    return AekoImprovementPlan(
         id_external_inventory=id_external_inventory,
         defined_problem=payload["defined_problem"],
         method=payload["method"],
@@ -124,7 +124,7 @@ class AekoInventoryAnalyzer:
 
         self._context = context or ""
 
-    def analyze(self, inventory: str, id_external_inventory: int) -> ImprovementPlan:
+    def analyze(self, inventory: str, id_external_inventory: int) -> AekoImprovementPlan:
         """
         Analyze a GHG inventory and return the improvement plan.
 
@@ -138,7 +138,7 @@ class AekoInventoryAnalyzer:
                 reads the database, so this cannot be derived here.
 
         Returns:
-            ImprovementPlan: The plan, mirroring one document of the
+            AekoImprovementPlan: The plan, mirroring one document of the
                 "improvement_plan" collection.
 
         Raises:

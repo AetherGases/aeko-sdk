@@ -1,7 +1,7 @@
 from .builder import PromptSpec
 
 # This agent's answer is not prose the caller reads — it is parsed straight into
-# an `ImprovementPlan` and persisted as one document of the "improvement_plan"
+# an `AekoImprovementPlan` and persisted as one document of the "improvement_plan"
 # collection (see `AekoInventoryAnalyzer.analyze`). The JSON contract below is
 # therefore stated in the scope, restated as the last task, and — the part that
 # actually decides the model's behaviour — demonstrated by every single shot.

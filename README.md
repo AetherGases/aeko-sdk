@@ -90,7 +90,7 @@ send_message()
 ```
 
 If the guardrail keeps rejecting past the retry cap, the run ends with **no** answer:
-`MessageResponse.message.output` is `""` and `approved` is `False`. Always check it.
+`AekoMessageResponse.message.output` is `""` and `approved` is `False`. Always check it.
 
 **Inventory flow** — enters at the inventory analyst, ends at a terminal node, so it
 never passes the guardrail:
@@ -124,19 +124,19 @@ Distribution and import name are the same: `aeko`. (The GitHub repository is `ae
 ## Quickstart
 
 ```python
-from aeko import Aeko, AekoMessenger, AekoInventoryAnalyzer, Session, User
+from aeko import Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser
 
 # 1. Configure the SDK once, for the whole process.
 Aeko.config("YOUR_GEMINI_API_KEY")
 
-# 2. Chat. Both arguments are the documents your database already holds.
-messenger = AekoMessenger()
-messenger.prepare(
-    Session.model_validate(db.sessions.find_one({"_id": session_id})),
-    User.model_validate(db.users.find_one({"_id": user_id})),
-)
+# 2. Chat. Both documents come straight out of your database, on every request.
+user = AekoUser.model_validate(db.users.find_one({"_id": user_id}))
+session = AekoSession.model_validate(db.sessions.find_one({"_id": session_id}))
 
-reply = messenger.send_message("What is the difference between scope 1 and scope 2?")
+messenger = AekoMessenger(user)
+reply = messenger.send_message(
+    "What is the difference between scope 1 and scope 2?", session
+)
 print(reply.message.output)  # the answer
 print(reply.agents_called)   # e.g. ['FAQ']
 print(reply.approved)        # guardrail verdict
@@ -171,9 +171,10 @@ before writing the integration — they explain every recommendation below.
    agent. Call them **at startup**, not per request. (`set_tools` is a `classmethod` for
    exactly this reason: registering tools on one instance would silently rebuild the
    agents behind every other instance's back.)
-3. **Session memory lives in the process.** `AekoMessenger` keeps conversation history in
-   a process-wide dict keyed by `session_id`. That is fine for a single worker, and *not*
-   enough for anything else — see the stateless pattern below.
+3. **The SDK keeps no session state at all.** The conversation lives in the `AekoSession`
+   you pass to every `send_message()` call, and the SDK updates that object in place
+   before returning. Nothing is cached between calls, so any worker can serve any
+   conversation — and the process never accumulates sessions it cannot evict.
 
 ### 1. Configure once, at startup
 
@@ -237,39 +238,53 @@ from aeko import AGENT_NAMES  # ('Roteador', 'FAQ', 'Orquestrador', ...)
 ### 3. The conversational flow
 
 ```python
-from aeko import AekoMessenger, Message, Session, User
+from aeko import AekoMessage, AekoMessenger, AekoSession, AekoUser
 
-messenger = AekoMessenger()
-
-session = messenger.prepare(
-    Session(
-        id="64b8f0a1c9e1a2b3c4d5e6f3",
-        id_user="64b8f0a1c9e1a2b3c4d5e6f1",
-        name="Scope 1 review",
-        messages=[Message(input="What is scope 3?", output="Scope 3 covers...")],
-    ),
-    User(id_external_user=1001, role="ESG analyst",
-         usecase="Tracks the boiler fleet's gas substitution."),
+# Built once per user — it holds nothing about any conversation.
+messenger = AekoMessenger(
+    AekoUser(id_external_user=1001, role="ESG analyst",
+             usecase="Tracks the boiler fleet's gas substitution."),
 )
 
-response = messenger.send_message("Our scope 1 jumped 12% this quarter. Where do I look?")
+# Rehydrated per request, from what you persisted.
+session = AekoSession(
+    id="64b8f0a1c9e1a2b3c4d5e6f3",
+    id_user="64b8f0a1c9e1a2b3c4d5e6f1",
+    name="Scope 1 review",
+    messages=[AekoMessage(input="What is scope 3?", output="Scope 3 covers...")],
+)
+
+response = messenger.send_message(
+    "Our scope 1 jumped 12% this quarter. Where do I look?", session
+)
 ```
 
-`prepare()` takes the two documents your database already holds, so there is no separate
+The two documents your database already holds go in as they are, so there is no separate
 "history" format to translate: `session.messages` **is** the conversation, replayed to the
-agents oldest first. Nothing is kept between calls — pass the session on every request and
-any worker can serve it.
+agents oldest first, **in full**. Nothing is kept between calls — pass the session on every
+request and any worker can serve it.
+
+Because the whole of `session.messages` is replayed, **deciding how much history is worth
+sending is your call, not the SDK's**. A conversation hundreds of turns long does not have
+to be sent whole: slice it when you rehydrate the session, and keep the complete document
+in the database.
+
+```python
+document = db.sessions.find_one({"_id": session_id})
+document["messages"] = document["messages"][-10:]   # what the agents will read
+session = AekoSession.model_validate(document)
+```
 
 `user.role` and `user.usecase` become the business context every agent reads. The
 identifiers (`_id`, `id_external_user`, `id_user`) never reach a prompt: they are there so
 you can correlate documents, and a model can do nothing with them.
 
-`send_message()` returns a `MessageResponse`:
+`send_message()` returns an `AekoMessageResponse`:
 
 | Field | Meaning |
 | --- | --- |
 | `message` | The turn, as one entry of `session.messages` — ready to append. |
-| `id_session` / `id_user` | The `_id`s of the session and user this answer belongs to, echoed back from `prepare()`. |
+| `id_session` / `id_user` | The `_id`s of the session and user this answer belongs to, echoed back from the session you sent in. |
 | `agents_called` | Names of the agents that contributed, in call order. |
 | `approved` | Whether the output guardrail approved the answer. |
 | `guardrail_retries` | How many times the guardrail sent the draft back. |
@@ -293,12 +308,11 @@ run on the fast one, the analysts on the slow one — so `input_tokens` and `out
 are the **whole run's** consumption, summed across every agent it called, not one model
 call's. That is the number that answers "what did this conversation cost".
 
-An answered turn is also appended to the `Session` you passed in, and `updated_at` is
-bumped, so a second `send_message()` in the same process sees it. A turn the guardrail
-rejected is *not* appended — a draft that never reached the user cannot become context for
-the next question.
-
-Calling `send_message()` before `prepare()` raises `SessionNotPreparedError`.
+An answered turn is appended to the `AekoSession` you passed in, and `updated_at` is
+bumped — the same object, updated in place, so you can persist exactly what you handed
+over. **Only a final result is recorded**: a turn the guardrail rejected is *not*
+appended, because a draft that never reached the user cannot become context for the next
+question.
 
 **User memories.** The SDK never receives `user_memory` documents: reading and expiring
 them is your API's job. Register a lookup tool instead, and the agents' instructions
@@ -309,7 +323,7 @@ AekoMessenger.set_tools({"FAQ": [AekoTool(tool=buscar_memorias,
                                           description="Consulta as memórias do usuário.")]})
 ```
 
-`UserMemory.to_prompt_line()` renders a memory the way those instructions expect
+`AekoUserMemory.to_prompt_line()` renders a memory the way those instructions expect
 (`"<field>: <description>"`), with `expires_at` and the identifiers left out.
 
 ### 4. The inventory flow
@@ -331,7 +345,7 @@ report that the chat-sized cap would truncate. `id_external_inventory` is what t
 resulting plan back to the inventory; the SDK never reads your database, so it cannot be
 derived here.
 
-It returns an `ImprovementPlan`, mirroring one document of the collection:
+It returns an `AekoImprovementPlan`, mirroring one document of the collection:
 
 | Field | Meaning |
 | --- | --- |
@@ -369,9 +383,9 @@ from aeko import (
     AekoInventoryAnalyzer,
     AekoMessenger,
     AekoNotConfiguredError,
+    AekoSession,
     AekoTool,
-    Session,
-    User,
+    AekoUser,
 )
 
 from .settings import settings
@@ -407,16 +421,15 @@ class ChatRequest(BaseModel):
 def chat(body: ChatRequest):
     # 1. Read the documents — this worker may never have seen this session before.
     #    The DTOs take them exactly as they come out of the collections.
-    session = Session.model_validate(db.session.find_one({"_id": body.session_id}))
-    user = User.model_validate(db.user.find_one({"_id": session.id_user}))
+    session = AekoSession.model_validate(db.session.find_one({"_id": body.session_id}))
+    user = AekoUser.model_validate(db.user.find_one({"_id": session.id_user}))
 
-    messenger = AekoMessenger()
-    messenger.prepare(session, user)
+    messenger = AekoMessenger(user)
 
     # 2. Run it. Blocking call: keep it off the event loop in production
     #    (`run_in_threadpool`, a task queue, or a sync worker).
     try:
-        response = messenger.send_message(body.message)
+        response = messenger.send_message(body.message, session)
     except AekoNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -472,8 +485,8 @@ Notes for production:
   a threadpool, a background worker, or a task queue.
 - **Never call `Aeko.config()` or `set_tools()` per request.** Both rebuild every agent
   process-wide; doing it under load throws away warm agents for every concurrent run.
-- **The SDK holds no session state.** Read the `Session` document and pass it to
-  `prepare()` on every request; any worker can then serve any conversation.
+- **The SDK holds no session state.** Read the `AekoSession` document and pass it to
+  `send_message()` on every request; any worker can then serve any conversation.
 - Configuration and registered tools are shared mutable process state, so treat startup as
   the only place that writes them.
 
@@ -484,7 +497,6 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | Exception | Raised when | Typical response |
 | --- | --- | --- |
 | `AekoNotConfiguredError` | `Aeko.config()` was never called, or the key is empty/not a string. | `503` — a deployment problem, not a user one. |
-| `SessionNotPreparedError` | `send_message()` ran before `prepare()`. | `500` — an integration bug. |
 | `UnknownAgentError` | `set_tools()` got a key that is not an agent name. Carries `.agent` and `.known_agents`. | Fail at startup. |
 | `MalformedAgentOutputError` | An agent's answer did not match the shape its prompt demands — today, the improvement plan's JSON. | `502` — retry the analysis rather than persisting a guess. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
@@ -493,7 +505,7 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 from aeko import AekoError
 
 try:
-    response = messenger.send_message(text)
+    response = messenger.send_message(text, session)
 except AekoError as exc:
     logger.exception("Aeko failed")
     raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -521,26 +533,26 @@ Everything below is importable directly from `aeko`.
 | Member | Signature |
 | --- | --- |
 | `set_tools` *(classmethod)* | `set_tools(tools: dict[str, list[AekoTool \| Any]]) -> None` |
-| `prepare` | `prepare(session: Session, user: User) -> Session` |
-| `send_message` | `send_message(message: str) -> MessageResponse` |
+| *constructor* | `AekoMessenger(user: AekoUser)` |
+| `send_message` | `send_message(message: str, session: AekoSession) -> AekoMessageResponse` |
 
 **`AekoInventoryAnalyzer`** — report entry point.
 
 | Member | Signature |
 | --- | --- |
 | `set_context` | `set_context(context: str) -> None` |
-| `analyze` | `analyze(inventory: str, id_external_inventory: int) -> ImprovementPlan` |
+| `analyze` | `analyze(inventory: str, id_external_inventory: int) -> AekoImprovementPlan` |
 
 **Data objects.** Every DTO that crosses the API boundary is a Pydantic model mirroring one
 MongoDB collection, field for field:
 
 | DTO | Collection |
 | --- | --- |
-| `User` | `user` |
-| `UserMemory` | `user_memory` |
-| `Session` | `session` |
-| `Message` | `session.messages[]` |
-| `ImprovementPlan` | `improvement_plan` |
+| `AekoUser` | `user` |
+| `AekoUserMemory` | `user_memory` |
+| `AekoSession` | `session` |
+| `AekoMessage` | `session.messages[]` |
+| `AekoImprovementPlan` | `improvement_plan` |
 
 `model_validate(document)` takes a raw document and `model_dump(by_alias=True)` gives one
 back — `_id` included, under that exact name — so the hand-off is lossless in both
@@ -549,7 +561,7 @@ SDK-only and mirror nothing.
 
 The identifiers (`_id`, `id_external_user`, `id_user`, `id_external_inventory`) and
 `expires_at` are carried across the boundary in both directions and echoed back on
-`MessageResponse` — they are how you correlate and log what came out of a run. What they
+`AekoMessageResponse` — they are how you correlate and log what came out of a run. What they
 never do is reach a prompt: a model can act on a role or a usecase, not on an ObjectId.
 
 **Timestamps.** The SDK stamps a timestamp only on a document it produces itself, and
@@ -557,13 +569,13 @@ never invents one for a document it merely received:
 
 | Field | Filled by | Why |
 | --- | --- | --- |
-| `Message.submitted_at` | SDK | The turn is created here; only the SDK knows when. |
-| `ImprovementPlan.updated_at` | SDK | The plan is produced here. |
-| `Session.updated_at` | SDK | The SDK is what updates the session, by appending the turn. |
-| `Session.created_at` | **You** | The session already exists by the time it reaches `prepare()`. |
-| `UserMemory.created_at` | **You** | The SDK never receives memories in the first place. |
+| `AekoMessage.submitted_at` | SDK | The turn is created here; only the SDK knows when. |
+| `AekoImprovementPlan.updated_at` | SDK | The plan is produced here. |
+| `AekoSession.updated_at` | SDK | The SDK is what updates the session, by appending the turn. |
+| `AekoSession.created_at` | **You** | The session already exists by the time it reaches `send_message()`. |
+| `AekoUserMemory.created_at` | **You** | The SDK never receives memories in the first place. |
 
-So `Session`, `User` and `UserMemory` default their timestamps to `None` rather than to
+So `AekoSession`, `AekoUser` and `AekoUserMemory` default their timestamps to `None` rather than to
 "now": a session read from the database brings its own `created_at` through untouched, and
 one built in Python without it would otherwise be handed a creation date that is simply
 false. The consequence to watch for is on the way back — a *new* session built in Python
@@ -575,7 +587,7 @@ session.model_dump(by_alias=True, exclude_none=True)
 ```
 
 **Exceptions**: `AekoError`, `AekoNotConfiguredError`, `MalformedAgentOutputError`,
-`SessionNotPreparedError`, `UnknownAgentError`.
+`UnknownAgentError`.
 **Constants**: `AGENT_NAMES`, `__version__`.
 
 **Defaults**
@@ -618,16 +630,15 @@ pip install aeko
 ```
 
 ```python
-from aeko import Aeko, AekoMessenger, AekoInventoryAnalyzer, Session, User
+from aeko import Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser
 
 Aeko.config("SUA_CHAVE_GEMINI")          # obrigatório: o SDK não lê variáveis de ambiente
 
-messenger = AekoMessenger()
-messenger.prepare(
-    Session.model_validate(db.session.find_one({"_id": id_sessao})),
-    User.model_validate(db.user.find_one({"_id": id_usuario})),
-)
-resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?")
+usuario = AekoUser.model_validate(db.user.find_one({"_id": id_usuario}))
+sessao = AekoSession.model_validate(db.session.find_one({"_id": id_sessao}))
+
+messenger = AekoMessenger(usuario)
+resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?", sessao)
 print(resposta.message.output)
 db.session.update_one({"_id": id_sessao},
                       {"$push": {"messages": resposta.message.model_dump()}})
@@ -642,12 +653,15 @@ Quatro pontos que definem a integração:
 1. **Configure no startup, nunca por requisição.** `Aeko.config()` e
    `AekoMessenger.set_tools()` alteram um runtime único do processo e reconstroem todos os
    agentes.
-2. **As DTOs espelham as collections.** `User`, `UserMemory`, `Session`, `Message` e
-   `ImprovementPlan` são modelos Pydantic com os mesmos campos dos documentos, `_id`
-   incluso: `model_validate(documento)` entra e `model_dump(by_alias=True)` volta igual.
-   O SDK não fala com o banco — quem lê e grava é a API.
-3. **O SDK não guarda sessão.** Passe o documento `Session` em todo `prepare()`: a
-   conversa é o próprio `session.messages`, e qualquer worker atende qualquer sessão. As
+2. **As DTOs espelham as collections.** `AekoUser`, `AekoUserMemory`, `AekoSession`,
+   `AekoMessage` e `AekoImprovementPlan` são modelos Pydantic com os mesmos campos dos
+   documentos, `_id` incluso: `model_validate(documento)` entra e
+   `model_dump(by_alias=True)` volta igual. O SDK não fala com o banco — quem lê e grava
+   é a API.
+3. **O SDK não guarda sessão.** Passe o documento `AekoSession` em todo `send_message()`:
+   a conversa é o próprio `session.messages`, o SDK o atualiza in-place e qualquer worker
+   atende qualquer sessão. Todo o `session.messages` é reenviado aos agentes, então
+   **limitar o histórico é decisão da API** — corte na reidratação, não no SDK. As
    memórias do usuário chegam por uma tool registrada em `set_tools()`, nunca por
    parâmetro.
 4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as

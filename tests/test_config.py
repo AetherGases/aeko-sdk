@@ -5,21 +5,21 @@ import json
 import pytest
 from langchain_core.tools import tool
 
+import aeko
 from aeko import (
     Aeko,
+    AekoImprovementPlan,
     AekoInventoryAnalyzer,
+    AekoMessage,
+    AekoMessageResponse,
     AekoMessenger,
+    AekoSession,
     AekoTool,
-    ImprovementPlan,
-    Message,
-    MessageResponse,
-    Session,
-    User,
+    AekoUser,
 )
 from aeko.config.exceptions import (
     AekoNotConfiguredError,
     MalformedAgentOutputError,
-    SessionNotPreparedError,
     UnknownAgentError,
 )
 from aeko.engine.runtime import (
@@ -82,10 +82,10 @@ def consulta_precos(query: str) -> str:
     return ""
 
 
-def make_user(**overrides) -> User:
+def make_user(**overrides) -> AekoUser:
     """A user as the API would have read it from the "user" collection."""
 
-    return User.model_validate({
+    return AekoUser.model_validate({
         "_id": USER_ID,
         "id_external_user": 1001,
         "role": "Gestor ambiental da Ceramica X",
@@ -94,10 +94,10 @@ def make_user(**overrides) -> User:
     })
 
 
-def make_session(**overrides) -> Session:
+def make_session(**overrides) -> AekoSession:
     """A conversation as the API would have read it from the "session" collection."""
 
-    return Session.model_validate({
+    return AekoSession.model_validate({
         "_id": SESSION_ID,
         "id_user": USER_ID,
         "name": "Suporte Técnico #12",
@@ -113,13 +113,16 @@ def configured():
 
 @pytest.fixture
 def messenger(configured, use_fake_llm):
-    """A messenger on a fresh session, plus the fake model driving the graph."""
+    """A messenger for a given user, plus the fake model driving the graph.
 
-    def _build(responses, session=None, user=None):
+    The session is deliberately not held here: it is an argument of every
+    `send_message()` call, so each test decides which conversation a message
+    belongs to.
+    """
+
+    def _build(responses, user=None):
         llm = use_fake_llm(responses)
-        instance = AekoMessenger()
-        instance.prepare(session or make_session(), user or make_user())
-        return instance, llm
+        return AekoMessenger(user or make_user()), llm
 
     return _build
 
@@ -285,7 +288,7 @@ def test_set_tools_prefers_the_description_given_by_the_caller():
 
 def test_set_tools_is_global(configured, use_fake_llm):
     use_fake_llm(CHAT_FLOW)
-    AekoMessenger().prepare(make_session(), make_user())
+    AekoMessenger(make_user())
     RUNTIME.agents_for()
 
     AekoMessenger.set_tools({"FAQ": [consulta_precos]})
@@ -300,7 +303,7 @@ def test_registered_tools_reach_the_agent_that_answers(messenger):
     })
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?")
+    instance.send_message("O que e hidrogenio verde?", make_session())
 
     assert "consulta_precos - Consulta o preco medio." in llm.system_prompt_for("FAQ")
 
@@ -308,60 +311,72 @@ def test_registered_tools_reach_the_agent_that_answers(messenger):
 def test_the_agents_are_told_to_consult_the_user_memories(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?")
+    instance.send_message("O que e hidrogenio verde?", make_session())
 
     assert "memórias do usuário" in llm.system_prompt_for("FAQ"), (
         "as memorias chegam por tool registrada pela API, e o prompt precisa manda-la consultar"
     )
 
 
-# --- prepare -------------------------------------------------------------
+# --- the session is rehydrated by the API, never held by the SDK ----------
 
 
-def test_prepare_takes_the_session_and_the_user_documents(configured, use_fake_llm):
+def test_the_messenger_is_built_from_the_user_alone(configured, use_fake_llm):
     use_fake_llm(CHAT_FLOW)
+
+    instance = AekoMessenger(make_user())
+
+    assert not hasattr(instance, "prepare"), (
+        "quem reidrata a sessao e a API; o SDK nao tem mais etapa de preparo"
+    )
+
+
+def test_the_messenger_holds_no_session_after_answering(messenger):
+    instance, _ = messenger(CHAT_FLOW)
     session = make_session()
 
-    prepared = AekoMessenger().prepare(session, make_user())
+    instance.send_message("O que e hidrogenio verde?", session)
 
-    assert prepared is session, "a conversa e o proprio documento, nao uma copia"
+    held = [value for value in vars(instance).values() if isinstance(value, AekoSession)]
 
-
-def test_prepare_resumes_a_session_from_its_persisted_messages(configured, use_fake_llm):
-    use_fake_llm(CHAT_FLOW)
-    session = make_session(messages=[
-        {"input": "pergunta antiga", "output": "resposta antiga"},
-    ])
-
-    prepared = AekoMessenger().prepare(session, make_user())
-
-    assert len(prepared.messages) == 1
-    assert isinstance(prepared.messages[0], Message)
+    assert held == [], "a sessao entra e sai por argumento, nunca fica no messenger"
 
 
-def test_send_message_requires_a_prepared_session(configured):
-    with pytest.raises(SessionNotPreparedError):
-        AekoMessenger().send_message("oi")
+def test_the_sdk_no_longer_exports_the_prepared_session_error():
+    assert not hasattr(aeko, "SessionNotPreparedError")
+    assert "SessionNotPreparedError" not in aeko.__all__
+
+
+def test_one_messenger_serves_several_sessions_without_mixing_them(messenger):
+    instance, llm = messenger(CHAT_FLOW)
+    first, second = make_session(id="sess-a"), make_session(id="sess-b")
+
+    instance.send_message("primeira pergunta", first)
+    instance.send_message("outra pergunta", second)
+
+    assert "primeira pergunta" not in llm.prompt_for("Roteador"), (
+        "a mesma instancia nao pode vazar uma conversa para dentro de outra"
+    )
+    assert len(first.messages) == 1 and len(second.messages) == 1
 
 
 # --- send_message --------------------------------------------------------
 
 
 def test_send_message_requires_configuration():
-    instance = AekoMessenger()
-    instance.prepare(make_session(), make_user())
+    instance = AekoMessenger(make_user())
 
     with pytest.raises(AekoNotConfiguredError):
-        instance.send_message("oi")
+        instance.send_message("oi", make_session())
 
 
 def test_send_message_returns_a_message_ready_to_persist(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?")
+    response = instance.send_message("O que e hidrogenio verde?", make_session())
 
-    assert isinstance(response, MessageResponse)
-    assert isinstance(response.message, Message)
+    assert isinstance(response, AekoMessageResponse)
+    assert isinstance(response.message, AekoMessage)
     assert response.message.input == "O que e hidrogenio verde?"
     assert response.message.output == FAQ_ANSWER
 
@@ -369,7 +384,7 @@ def test_send_message_returns_a_message_ready_to_persist(messenger):
 def test_the_response_says_which_session_and_user_it_belongs_to(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?")
+    response = instance.send_message("O que e hidrogenio verde?", make_session())
 
     assert response.id_session == SESSION_ID
     assert response.id_user == USER_ID
@@ -378,7 +393,7 @@ def test_the_response_says_which_session_and_user_it_belongs_to(messenger):
 def test_the_persisted_message_mirrors_the_collection(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?")
+    response = instance.send_message("O que e hidrogenio verde?", make_session())
 
     assert set(response.message.model_dump()) == {
         "input", "output", "submitted_at", "llm", "input_tokens", "output_tokens",
@@ -388,7 +403,7 @@ def test_the_persisted_message_mirrors_the_collection(messenger):
 def test_the_message_records_what_the_run_consumed(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    message = instance.send_message("O que e hidrogenio verde?").message
+    message = instance.send_message("O que e hidrogenio verde?", make_session()).message
 
     # The chat flow calls the Roteador and then the FAQ.
     assert message.input_tokens == 2 * llm.usage_input_tokens
@@ -398,28 +413,30 @@ def test_the_message_records_what_the_run_consumed(messenger):
 
 def test_a_provider_that_reports_no_usage_leaves_the_counters_zeroed(configured, use_fake_llm):
     use_fake_llm(CHAT_FLOW, usage_input_tokens=0, usage_output_tokens=0)
-    instance = AekoMessenger()
-    instance.prepare(make_session(), make_user())
+    instance = AekoMessenger(make_user())
 
-    message = instance.send_message("O que e hidrogenio verde?").message
+    message = instance.send_message("O que e hidrogenio verde?", make_session()).message
 
     assert (message.input_tokens, message.output_tokens) == (0, 0)
 
 
 def test_the_answered_turn_is_appended_to_the_session(messenger):
     session = make_session()
-    instance, _ = messenger(CHAT_FLOW, session=session)
+    instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?")
+    response = instance.send_message("O que e hidrogenio verde?", session)
 
     assert session.messages == [response.message]
+    assert session.messages[-1] is response.message, "a sessao e atualizada in-place"
+    assert session.messages[-1].input == "O que e hidrogenio verde?"
+    assert session.messages[-1].output == FAQ_ANSWER
     assert session.updated_at == response.message.submitted_at
 
 
 def test_answer_is_free_of_the_routing_marker(messenger):
     instance, _ = messenger(ANALYSIS_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?")
+    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
 
     assert response.message.output == CONSOLIDATED
     assert "Next agent" not in response.message.output
@@ -428,7 +445,7 @@ def test_answer_is_free_of_the_routing_marker(messenger):
 def test_response_reports_the_agents_that_contributed(messenger):
     instance, _ = messenger(ANALYSIS_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?")
+    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
 
     assert "Analista de Poluentes" in response.agents_called
     assert response.approved is True
@@ -438,7 +455,7 @@ def test_response_reports_the_agents_that_contributed(messenger):
 def test_a_terminal_agent_without_analysis_is_still_reported(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?")
+    response = instance.send_message("O que e hidrogenio verde?", make_session())
 
     # The FAQ answers directly and never writes to "previous_agents".
     assert response.agents_called == ["FAQ"]
@@ -447,7 +464,7 @@ def test_a_terminal_agent_without_analysis_is_still_reported(messenger):
 def test_the_user_role_and_usecase_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?")
+    instance.send_message("O que e hidrogenio verde?", make_session())
 
     prompt = llm.prompt_for("Roteador")
 
@@ -458,7 +475,7 @@ def test_the_user_role_and_usecase_reach_the_agents(messenger):
 def test_the_identifiers_never_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?")
+    instance.send_message("O que e hidrogenio verde?", make_session())
 
     prompt = llm.prompt_for("Roteador")
 
@@ -468,9 +485,10 @@ def test_the_identifiers_never_reach_the_agents(messenger):
 
 def test_previous_turns_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
+    session = make_session()
 
-    instance.send_message("O que e hidrogenio verde?")
-    instance.send_message("E a amonia verde?")
+    instance.send_message("O que e hidrogenio verde?", session)
+    instance.send_message("E a amonia verde?", session)
 
     last_prompt = llm.prompt_for("FAQ")
 
@@ -483,9 +501,9 @@ def test_a_resumed_session_carries_its_history_into_the_first_message(messenger)
     session = make_session(messages=[
         {"input": "pergunta de ontem", "output": "resposta de ontem"},
     ])
-    instance, llm = messenger(CHAT_FLOW, session=session)
+    instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("E hoje?")
+    instance.send_message("E hoje?", session)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -493,10 +511,38 @@ def test_a_resumed_session_carries_its_history_into_the_first_message(messenger)
     assert "resposta de ontem" in prompt
 
 
+def test_every_turn_the_api_sent_reaches_the_agents(messenger):
+    # Deciding how much history is worth sending is the API's call, not the
+    # SDK's: whatever `session.messages` carries is replayed in full.
+    session = make_session(messages=[
+        {"input": f"pergunta {n}", "output": f"resposta {n}"} for n in range(20)
+    ])
+    instance, llm = messenger(CHAT_FLOW)
+
+    instance.send_message("E agora?", session)
+
+    prompt = llm.prompt_for("Roteador")
+
+    assert "pergunta 0" in prompt, "o SDK nao corta o historico que a API mandou"
+    assert "resposta 19" in prompt
+
+
+def test_the_session_keeps_its_whole_history(messenger):
+    session = make_session(messages=[
+        {"input": f"pergunta {n}", "output": f"resposta {n}"} for n in range(20)
+    ])
+    instance, _ = messenger(CHAT_FLOW)
+
+    instance.send_message("E agora?", session)
+
+    assert len(session.messages) == 21
+    assert session.messages[0].input == "pergunta 0"
+
+
 def test_a_rejected_draft_produces_no_answer(messenger):
     instance, _ = messenger(REJECTED_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?")
+    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
 
     assert response.message.output == ""
     assert response.approved is False
@@ -505,25 +551,23 @@ def test_a_rejected_draft_produces_no_answer(messenger):
 
 def test_a_rejected_turn_does_not_pollute_the_history(messenger):
     session = make_session()
-    instance, llm = messenger(REJECTED_FLOW, session=session)
+    instance, llm = messenger(REJECTED_FLOW)
 
-    instance.send_message("Quais os riscos do meu inventario?")
-    instance.send_message("E agora?")
+    instance.send_message("Quais os riscos do meu inventario?", session)
+    instance.send_message("E agora?", session)
 
-    assert session.messages == [], "uma resposta reprovada nao vira contexto da proxima"
+    assert session.messages == [], "so o resultado final e gravado; um reprovado nao e"
     assert "Histórico da conversa" not in llm.prompt_for("Roteador")
 
 
 def test_sessions_are_isolated_from_each_other(configured, use_fake_llm):
     llm = use_fake_llm(CHAT_FLOW)
 
-    first = AekoMessenger()
-    first.prepare(make_session(id="sess-a"), make_user())
-    first.send_message("primeira pergunta")
+    first = AekoMessenger(make_user())
+    first.send_message("primeira pergunta", make_session(id="sess-a"))
 
-    second = AekoMessenger()
-    second.prepare(make_session(id="sess-b"), make_user())
-    second.send_message("outra pergunta")
+    second = AekoMessenger(make_user())
+    second.send_message("outra pergunta", make_session(id="sess-b"))
 
     assert "primeira pergunta" not in llm.prompt_for("Roteador")
 
@@ -536,7 +580,7 @@ def test_analyze_returns_an_improvement_plan(configured, use_fake_llm):
 
     plan = AekoInventoryAnalyzer().analyze(INVENTORY_MD, INVENTORY_ID)
 
-    assert isinstance(plan, ImprovementPlan)
+    assert isinstance(plan, AekoImprovementPlan)
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
     assert plan.method == PLAN_FIELDS["method"]
     assert plan.reasoning == PLAN_FIELDS["reasoning"]
@@ -677,9 +721,8 @@ def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch)
     monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
     RUNTIME.agents.clear()
 
-    instance = AekoMessenger()
-    instance.prepare(make_session(), make_user())
-    instance.send_message("O que e hidrogenio verde?")
+    instance = AekoMessenger(make_user())
+    instance.send_message("O que e hidrogenio verde?", make_session())
 
     assert caps == [DEFAULT_MAX_TOKENS], (
         "o fluxo conversacional usa o teto padrao, nao o de relatorio"

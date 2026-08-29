@@ -62,6 +62,23 @@ def test_build_context_message_omits_guardrail_section_when_no_rejection():
     assert "Pontos apontados pelo Guardrail de Saída" not in message.content
 
 
+def test_build_context_message_replays_the_whole_history_it_was_given():
+    # How many turns are worth sending is decided by the application that owns
+    # the conversation, so the node never trims what it received.
+    history = [
+        HumanMessage(content=f"pergunta {n}") for n in range(30)
+    ]
+    state = create_initial_state("Pergunta de teste", history=history)
+
+    message = nodes._build_context_message(state)
+
+    assert "pergunta 0" in message.content
+    assert "pergunta 29" in message.content
+    assert not hasattr(nodes, "HISTORY_MESSAGE_LIMIT"), (
+        "limitar o historico e responsabilidade da API, nao do SDK"
+    )
+
+
 # --- _build_guardrail_message --------------------------------------------
 
 

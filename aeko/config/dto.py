@@ -80,7 +80,7 @@ class AekoTool:
         return tool if isinstance(tool, cls) else cls(tool=tool)
 
 
-class User(BaseModel):
+class AekoUser(BaseModel):
     """
     Who is asking, mirroring one document of the "user" collection.
 
@@ -130,7 +130,7 @@ class User(BaseModel):
         return "\n".join(lines)
 
 
-class UserMemory(BaseModel):
+class AekoUserMemory(BaseModel):
     """
     One remembered fact about a user, mirroring the "user_memory" collection.
 
@@ -173,7 +173,7 @@ class UserMemory(BaseModel):
         return f"{self.field}: {self.description}"
 
 
-class Message(BaseModel):
+class AekoMessage(BaseModel):
     """
     One exchanged turn, mirroring an entry of "session.messages".
 
@@ -195,14 +195,16 @@ class Message(BaseModel):
     output_tokens: int = Field(default=0, ge=0)
 
 
-class Session(BaseModel):
+class AekoSession(BaseModel):
     """
     A conversation, mirroring one document of the "session" collection.
 
-    This is what `AekoMessenger.prepare()` takes: the API hands over the
-    document it persisted and the SDK rebuilds the conversation from `messages`,
-    which is how a session resumed on another worker keeps its context without
-    the API having to translate anything.
+    This is what `AekoMessenger.send_message()` takes: the API rehydrates the
+    document it persisted, hands it over, and the SDK rebuilds the conversation
+    from `messages` and appends the answered turn back to them in place. That
+    is how a session resumed on another worker keeps its context without the
+    API having to translate anything, and why the SDK caches no session of its
+    own.
 
     Attributes:
         id: The document's `_id`. Owned by the database.
@@ -218,12 +220,12 @@ class Session(BaseModel):
     id: str | None = Field(default=None, alias="_id")
     id_user: str | None = None
     name: str = ""
-    messages: list[Message] = Field(default_factory=list)
+    messages: list[AekoMessage] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
 
-class MessageResponse(BaseModel):
+class AekoMessageResponse(BaseModel):
     """
     The answer returned by `AekoMessenger.send_message()`.
 
@@ -232,8 +234,8 @@ class MessageResponse(BaseModel):
     describes *how* the run reached that answer — useful for logging and
     debugging, and deliberately kept out of the persisted document.
 
-    The identifiers are echoed back from the prepared session for the same
-    reason they exist at all: they are what lets the API file this answer
+    The identifiers are echoed back from the session that was sent in, for the
+    same reason they exist at all: they are what lets the API file this answer
     against the right conversation and user, and log it, without having to
     remember out of band which run it asked for. They stay out of `message`
     because the collection's own entries do not carry them.
@@ -247,7 +249,7 @@ class MessageResponse(BaseModel):
         guardrail_retries: How many times the guardrail sent the draft back.
     """
 
-    message: Message
+    message: AekoMessage
     id_session: str | None = None
     id_user: str | None = None
     agents_called: list[str] = Field(default_factory=list)
@@ -255,7 +257,7 @@ class MessageResponse(BaseModel):
     guardrail_retries: int = Field(default=0, ge=0)
 
 
-class ImprovementPlan(BaseModel):
+class AekoImprovementPlan(BaseModel):
     """
     The plan returned by `AekoInventoryAnalyzer.analyze()`, mirroring one
     document of the "improvement_plan" collection.

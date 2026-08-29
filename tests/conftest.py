@@ -159,7 +159,7 @@ def reset_aeko():
 
     `Aeko.reset()` also drops `RUNTIME.agents`, so no test inherits agents
     another one built (or faked). Conversations need no cleanup: they live in
-    the `Session` DTO each test builds, not in the messenger.
+    the `AekoSession` each test passes to `send_message()`, not in the messenger.
     """
 
     Aeko.reset()
