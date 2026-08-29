@@ -21,12 +21,6 @@ def _max_tokens_from(config: RunnableConfig | None) -> int:
     return (config or {}).get("configurable", {}).get("max_tokens") or RUNTIME.max_tokens
 
 
-# How many prior messages of the conversation are replayed to an agent as
-# context. Enough to keep a follow-up question intelligible, bounded so a long
-# session doesn't crowd out the actual question.
-HISTORY_MESSAGE_LIMIT = 10
-
-
 def _format_history(messages: list) -> str:
     """
     Format prior conversation turns as a "Usuário:"/"Assistente:" transcript.
@@ -98,10 +92,11 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
         parts.append(f"Contexto da empresa/usuário:\n{company_context}")
 
     # The current question is already in `initial_question`; everything before
-    # it is the prior conversation.
+    # it is the prior conversation. It is replayed whole: whoever owns the
+    # conversation decides how many turns are worth seeding into the state.
     history = (state.get("messages") or [])[:-1]
     if history:
-        parts.append(f"Histórico da conversa:\n{_format_history(history[-HISTORY_MESSAGE_LIMIT:])}")
+        parts.append(f"Histórico da conversa:\n{_format_history(history)}")
 
     parts.append(state["initial_question"])
 

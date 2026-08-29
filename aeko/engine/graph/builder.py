@@ -182,8 +182,9 @@ def get_app() -> Any:
     """
     Compile the graph.
 
-    Conversation memory is kept by `AekoMessenger` itself, so the graph is
-    compiled without a checkpointer.
+    The conversation is supplied by the caller on every run — `AekoMessenger`
+    seeds it from the session the API hands over — so the graph is compiled
+    without a checkpointer.
 
     Returns:
         Any: The compiled graph, ready to `.invoke()`.

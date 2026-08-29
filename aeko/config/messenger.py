@@ -4,8 +4,8 @@ from langchain_core.callbacks import get_usage_metadata_callback
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from aeko.config._text import strip_routing_marker
-from aeko.config.dto import AekoTool, Message, MessageResponse, Session, User
-from aeko.config.exceptions import SessionNotPreparedError, UnknownAgentError
+from aeko.config.dto import AekoMessage, AekoMessageResponse, AekoSession, AekoTool, AekoUser
+from aeko.config.exceptions import UnknownAgentError
 from aeko.engine.graph.builder import get_app
 from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import AGENT_NAMES
@@ -65,25 +65,37 @@ def _agents_called(result: dict) -> list[str]:
     return called
 
 
-def _history_from(session: Session) -> list[BaseMessage]:
+# How many turns of "session.messages" a run is allowed to read back. Enough to
+# keep a follow-up question intelligible, bounded so a long conversation neither
+# crowds out the actual question nor grows what each turn costs without limit.
+# The session itself is never trimmed: this caps what the agents see, not what
+# the API persists.
+SESSION_HISTORY_USAGE = 10
+
+
+def _history_from(session: AekoSession) -> list[BaseMessage]:
     """
     Rebuild the conversation the graph should see from a session document.
 
-    Each persisted turn holds both sides of the exchange, so one entry of
-    "session.messages" becomes a human message followed by the assistant's
-    reply. A turn the guardrail never approved has an empty `output` and
-    contributes only the question, which is exactly how it was stored.
+    Only the `SESSION_HISTORY_USAGE` most recent turns are replayed, however
+    many the session carries — a conversation of 500 turns costs the same as
+    one of 10. Each persisted turn holds both sides of the exchange, so one
+    entry of "session.messages" becomes a human message followed by the
+    assistant's reply. A turn the guardrail never approved has an empty
+    `output` and contributes only the question, which is exactly how it was
+    stored.
 
     Args:
         session: The session as the API read it from the database.
 
     Returns:
-        list[BaseMessage]: The turns as LangChain messages, oldest first.
+        list[BaseMessage]: The most recent turns as LangChain messages, oldest
+            first.
     """
 
     messages: list[BaseMessage] = []
 
-    for turn in session.messages:
+    for turn in session.messages[-SESSION_HISTORY_USAGE:]:
         messages.append(HumanMessage(content=turn.input))
         if turn.output:
             messages.append(AIMessage(content=turn.output))
@@ -120,19 +132,32 @@ class AekoMessenger:
     """
     Conversational entry point: routes a user message through the agent graph.
 
-    The conversation lives in the `Session` given to `prepare()`, mirroring the
-    "session" collection: the API reads the document, hands it over, and gets a
-    new entry back to append. Nothing is kept process-wide between calls, which
-    is what lets a stateless API serve the same conversation from any worker.
+    A messenger holds only *who* is asking. The conversation itself travels
+    with each `send_message()` call as an `AekoSession` the API rehydrated from
+    the "session" collection, and is updated in place before the call returns.
+    Nothing about a conversation is retained here between calls, which is what
+    lets a stateless API serve any session from any worker — and what keeps the
+    process from accumulating session state it would never be able to evict.
+
+    The session may carry any number of turns; only the most recent ones are
+    read back into a run (see `SESSION_HISTORY_USAGE`).
     """
 
     # Tools are process-wide. Registering them per instance would rebuild the
     # shared agent registry behind the other instances' backs, so `set_tools`
     # is deliberately a classmethod.
 
-    def __init__(self):
-        self._session: Session | None = None
-        self._user: User | None = None
+    def __init__(self, user: AekoUser):
+        """
+        Open a messenger on behalf of a given user.
+
+        Args:
+            user: Who is asking, as the API read it from the "user" collection.
+                Their role and usecase become the business context every agent
+                reads; the identifiers never reach a prompt.
+        """
+
+        self._user = user
 
     @classmethod
     def set_tools(cls, tools: dict[str, list[Any]]) -> None:
@@ -167,60 +192,38 @@ class AekoMessenger:
 
         RUNTIME.configure(tools=normalized)
 
-    def prepare(self, session: Session, user: User) -> Session:
-        """
-        Open (or resume) a conversation, on behalf of a given user.
-
-        Args:
-            session: The conversation, as the API read it from the "session"
-                collection. Its `messages` are replayed to the agents as the
-                conversation so far, and `send_message()` appends to them.
-            user: Who is asking, as the API read it from the "user" collection.
-                Their role and usecase become the business context every agent
-                reads; the identifiers never reach a prompt.
-
-        Returns:
-            Session: The session this messenger now holds — the same object,
-                so appended turns are visible to the caller that owns it.
-        """
-
-        self._session = session
-        self._user = user
-
-        return session
-
-    def send_message(self, message: str) -> MessageResponse:
+    def send_message(self, message: str, session: AekoSession) -> AekoMessageResponse:
         """
         Send a user message through the graph and return the reviewed answer.
 
-        The answer is returned as a `Message`, ready to be appended to the
-        session document, and is also appended to the held session so a second
-        call in the same process sees the turn that just happened. A turn the
-        guardrail never approved produces no answer and is not recorded, so a
-        rejected draft cannot become context for the next question.
+        The session is the API's, rehydrated from the "session" collection on
+        every request: its `messages` seed the run's conversational context,
+        and the answered turn is appended back to them in place, together with
+        a bumped `updated_at`, so the caller can persist the same object it
+        handed over. Only the `SESSION_HISTORY_USAGE` most recent turns are
+        read back into the run; the session keeps every turn it arrived with.
+
+        Only a final result is recorded. A turn the guardrail never approved
+        produces no answer and is left out of the session, so a rejected draft
+        cannot become context for the next question.
 
         Args:
             message: The user's message.
+            session: The conversation this message belongs to.
 
         Returns:
-            MessageResponse: The turn to persist, the session and user it
+            AekoMessageResponse: The turn to persist, the session and user it
                 belongs to, plus which agents contributed and the output
                 guardrail's verdict.
 
         Raises:
-            SessionNotPreparedError: If `prepare()` hasn't been called.
             AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
         """
-
-        if self._session is None or self._user is None:
-            raise SessionNotPreparedError(
-                "Call AekoMessenger.prepare(session, user) before sending messages."
-            )
 
         state = create_initial_state(
             message,
             company_context=self._user.to_prompt_context(),
-            history=_history_from(self._session),
+            history=_history_from(session),
         )
 
         with get_usage_metadata_callback() as usage:
@@ -231,7 +234,7 @@ class AekoMessenger:
         answer = _final_answer(result, seeded=len(state["messages"]))
         llm, input_tokens, output_tokens = _usage_of(usage.usage_metadata)
 
-        turn = Message(
+        turn = AekoMessage(
             input=message,
             output=answer,
             llm=llm,
@@ -240,13 +243,13 @@ class AekoMessenger:
         )
 
         if answer:
-            self._session.messages.append(turn)
-            self._session.updated_at = turn.submitted_at
+            session.messages.append(turn)
+            session.updated_at = turn.submitted_at
 
-        return MessageResponse(
+        return AekoMessageResponse(
             message=turn,
-            id_session=self._session.id,
-            id_user=self._session.id_user,
+            id_session=session.id,
+            id_user=session.id_user,
             agents_called=_agents_called(result),
             approved=bool(result.get("guard_rail_approved")),
             guardrail_retries=int(result.get("guard_rail_retries", 0)),

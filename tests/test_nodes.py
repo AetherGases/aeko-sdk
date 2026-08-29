@@ -62,6 +62,24 @@ def test_build_context_message_omits_guardrail_section_when_no_rejection():
     assert "Pontos apontados pelo Guardrail de Saída" not in message.content
 
 
+def test_build_context_message_replays_the_whole_history_it_was_given():
+    # Trimming is decided once, when the facade seeds the state from the
+    # session (see `SESSION_HISTORY_USAGE`), so the node replays whatever it
+    # was handed instead of applying a second, competing cut of its own.
+    history = [
+        HumanMessage(content=f"pergunta {n}") for n in range(30)
+    ]
+    state = create_initial_state("Pergunta de teste", history=history)
+
+    message = nodes._build_context_message(state)
+
+    assert "pergunta 0" in message.content
+    assert "pergunta 29" in message.content
+    assert not hasattr(nodes, "HISTORY_MESSAGE_LIMIT"), (
+        "o corte mora na fachada (SESSION_HISTORY_USAGE); o no nao pode ter o seu"
+    )
+
+
 # --- _build_guardrail_message --------------------------------------------
 
 
