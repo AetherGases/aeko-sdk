@@ -65,25 +65,37 @@ def _agents_called(result: dict) -> list[str]:
     return called
 
 
+# How many turns of "session.messages" a run is allowed to read back. Enough to
+# keep a follow-up question intelligible, bounded so a long conversation neither
+# crowds out the actual question nor grows what each turn costs without limit.
+# The session itself is never trimmed: this caps what the agents see, not what
+# the API persists.
+SESSION_HISTORY_USAGE = 10
+
+
 def _history_from(session: AekoSession) -> list[BaseMessage]:
     """
     Rebuild the conversation the graph should see from a session document.
 
-    Each persisted turn holds both sides of the exchange, so one entry of
-    "session.messages" becomes a human message followed by the assistant's
-    reply. A turn the guardrail never approved has an empty `output` and
-    contributes only the question, which is exactly how it was stored.
+    Only the `SESSION_HISTORY_USAGE` most recent turns are replayed, however
+    many the session carries — a conversation of 500 turns costs the same as
+    one of 10. Each persisted turn holds both sides of the exchange, so one
+    entry of "session.messages" becomes a human message followed by the
+    assistant's reply. A turn the guardrail never approved has an empty
+    `output` and contributes only the question, which is exactly how it was
+    stored.
 
     Args:
         session: The session as the API read it from the database.
 
     Returns:
-        list[BaseMessage]: The turns as LangChain messages, oldest first.
+        list[BaseMessage]: The most recent turns as LangChain messages, oldest
+            first.
     """
 
     messages: list[BaseMessage] = []
 
-    for turn in session.messages:
+    for turn in session.messages[-SESSION_HISTORY_USAGE:]:
         messages.append(HumanMessage(content=turn.input))
         if turn.output:
             messages.append(AIMessage(content=turn.output))
@@ -126,6 +138,9 @@ class AekoMessenger:
     Nothing about a conversation is retained here between calls, which is what
     lets a stateless API serve any session from any worker — and what keeps the
     process from accumulating session state it would never be able to evict.
+
+    The session may carry any number of turns; only the most recent ones are
+    read back into a run (see `SESSION_HISTORY_USAGE`).
     """
 
     # Tools are process-wide. Registering them per instance would rebuild the
@@ -185,8 +200,8 @@ class AekoMessenger:
         every request: its `messages` seed the run's conversational context,
         and the answered turn is appended back to them in place, together with
         a bumped `updated_at`, so the caller can persist the same object it
-        handed over. Every message in `session.messages` is replayed — how much
-        history is worth sending is the API's call, not the SDK's.
+        handed over. Only the `SESSION_HISTORY_USAGE` most recent turns are
+        read back into the run; the session keeps every turn it arrived with.
 
         Only a final result is recorded. A turn the guardrail never approved
         produces no answer and is left out of the session, so a rejected draft

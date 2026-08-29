@@ -22,6 +22,7 @@ from aeko.config.exceptions import (
     MalformedAgentOutputError,
     UnknownAgentError,
 )
+from aeko.config.messenger import SESSION_HISTORY_USAGE
 from aeko.engine.runtime import (
     DEFAULT_FAST_MODEL,
     DEFAULT_MAX_TOKENS,
@@ -511,9 +512,7 @@ def test_a_resumed_session_carries_its_history_into_the_first_message(messenger)
     assert "resposta de ontem" in prompt
 
 
-def test_every_turn_the_api_sent_reaches_the_agents(messenger):
-    # Deciding how much history is worth sending is the API's call, not the
-    # SDK's: whatever `session.messages` carries is replayed in full.
+def test_only_the_last_turns_of_the_session_reach_the_agents(messenger):
     session = make_session(messages=[
         {"input": f"pergunta {n}", "output": f"resposta {n}"} for n in range(20)
     ])
@@ -523,11 +522,41 @@ def test_every_turn_the_api_sent_reaches_the_agents(messenger):
 
     prompt = llm.prompt_for("Roteador")
 
-    assert "pergunta 0" in prompt, "o SDK nao corta o historico que a API mandou"
+    assert "pergunta 10" in prompt, "os 10 turnos mais recentes sao o contexto"
     assert "resposta 19" in prompt
+    assert "pergunta 9" not in prompt, "o que passa do limite nao chega ao agente"
+    assert "pergunta 0" not in prompt
 
 
-def test_the_session_keeps_its_whole_history(messenger):
+def test_the_limit_counts_turns_of_the_session(messenger):
+    session = make_session(messages=[
+        {"input": f"pergunta {n}", "output": f"resposta {n}"}
+        for n in range(SESSION_HISTORY_USAGE + 5)
+    ])
+    instance, llm = messenger(CHAT_FLOW)
+
+    instance.send_message("E agora?", session)
+
+    replayed = llm.prompt_for("Roteador").count("Usuário: pergunta")
+
+    assert replayed == SESSION_HISTORY_USAGE
+
+
+def test_a_session_shorter_than_the_limit_is_replayed_whole(messenger):
+    session = make_session(messages=[
+        {"input": f"pergunta {n}", "output": f"resposta {n}"} for n in range(3)
+    ])
+    instance, llm = messenger(CHAT_FLOW)
+
+    instance.send_message("E agora?", session)
+
+    prompt = llm.prompt_for("Roteador")
+
+    assert "pergunta 0" in prompt
+    assert "resposta 2" in prompt
+
+
+def test_the_session_keeps_its_whole_history_even_past_the_limit(messenger):
     session = make_session(messages=[
         {"input": f"pergunta {n}", "output": f"resposta {n}"} for n in range(20)
     ])

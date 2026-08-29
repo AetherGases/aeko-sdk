@@ -63,8 +63,9 @@ def test_build_context_message_omits_guardrail_section_when_no_rejection():
 
 
 def test_build_context_message_replays_the_whole_history_it_was_given():
-    # How many turns are worth sending is decided by the application that owns
-    # the conversation, so the node never trims what it received.
+    # Trimming is decided once, when the facade seeds the state from the
+    # session (see `SESSION_HISTORY_USAGE`), so the node replays whatever it
+    # was handed instead of applying a second, competing cut of its own.
     history = [
         HumanMessage(content=f"pergunta {n}") for n in range(30)
     ]
@@ -75,7 +76,7 @@ def test_build_context_message_replays_the_whole_history_it_was_given():
     assert "pergunta 0" in message.content
     assert "pergunta 29" in message.content
     assert not hasattr(nodes, "HISTORY_MESSAGE_LIMIT"), (
-        "limitar o historico e responsabilidade da API, nao do SDK"
+        "o corte mora na fachada (SESSION_HISTORY_USAGE); o no nao pode ter o seu"
     )
 
 

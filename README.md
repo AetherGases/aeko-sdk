@@ -261,19 +261,14 @@ response = messenger.send_message(
 
 The two documents your database already holds go in as they are, so there is no separate
 "history" format to translate: `session.messages` **is** the conversation, replayed to the
-agents oldest first, **in full**. Nothing is kept between calls — pass the session on every
-request and any worker can serve it.
+agents oldest first. Nothing is kept between calls — pass the session on every request and
+any worker can serve it.
 
-Because the whole of `session.messages` is replayed, **deciding how much history is worth
-sending is your call, not the SDK's**. A conversation hundreds of turns long does not have
-to be sent whole: slice it when you rehydrate the session, and keep the complete document
-in the database.
-
-```python
-document = db.sessions.find_one({"_id": session_id})
-document["messages"] = document["messages"][-10:]   # what the agents will read
-session = AekoSession.model_validate(document)
-```
+**Only the 10 most recent turns are replayed.** Send the session as long as it is: a
+conversation of 500 turns costs a run exactly what one of 10 does, and you do not have to
+slice anything on the way in. What the SDK caps is what the agents *read*, never what you
+persist — the turn it answers is appended to the session you passed, and every earlier turn
+is still there when the call returns.
 
 `user.role` and `user.usecase` become the business context every agent reads. The
 identifiers (`_id`, `id_external_user`, `id_user`) never reach a prompt: they are there so
@@ -660,8 +655,8 @@ Quatro pontos que definem a integração:
    é a API.
 3. **O SDK não guarda sessão.** Passe o documento `AekoSession` em todo `send_message()`:
    a conversa é o próprio `session.messages`, o SDK o atualiza in-place e qualquer worker
-   atende qualquer sessão. Todo o `session.messages` é reenviado aos agentes, então
-   **limitar o histórico é decisão da API** — corte na reidratação, não no SDK. As
+   atende qualquer sessão. Só os **10 turnos mais recentes** são reenviados aos agentes —
+   mande a sessão inteira, o corte é do que o modelo lê, nunca do que você persiste. As
    memórias do usuário chegam por uma tool registrada em `set_tools()`, nunca por
    parâmetro.
 4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
