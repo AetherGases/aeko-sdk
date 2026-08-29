@@ -1,5 +1,6 @@
 # Requires Python >=3.11,<3.12
 langchain-core==1.5.5
+pydantic==2.13.4
 langchain-classic==1.0.8
 langgraph==1.2.11
 langchain-google-genai==2.1.12

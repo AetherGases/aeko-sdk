@@ -15,7 +15,6 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 
 from aeko.config.aeko import Aeko
-from aeko.config.messenger import AekoMessenger
 from aeko.engine.runtime import RUNTIME
 
 # Every agent's system prompt states its identity in this exact shape (see
@@ -55,6 +54,9 @@ class FakeChatModel(BaseChatModel):
         default_response: Returned for any agent without a scripted response.
         failing_models: Model ids that should raise instead of answering, used
             to exercise the fallback wiring.
+        usage_input_tokens: Prompt tokens each call reports, so the SDK's token
+            accounting can be exercised without a real provider.
+        usage_output_tokens: Completion tokens each call reports.
         calls: One (agent name, last human message) tuple per invocation, in
             call order, so tests can assert what an agent actually received.
         system_prompts: Agent name to the system prompt it was last called
@@ -65,6 +67,8 @@ class FakeChatModel(BaseChatModel):
     default_response: str = DEFAULT_FAKE_RESPONSE
     failing_models: tuple[str, ...] = ()
     model: str = "fake-model"
+    usage_input_tokens: int = 11
+    usage_output_tokens: int = 7
     calls: list[tuple[str, str]] = []
     system_prompts: dict[str, str] = {}
 
@@ -83,7 +87,21 @@ class FakeChatModel(BaseChatModel):
         )
 
         content = self.responses.get(agent, self.default_response).replace("{agent}", agent)
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+
+        # Both `usage_metadata` and a `model_name` are required for LangChain's
+        # usage callback to record the call, which is what fills the token and
+        # llm fields of a persisted message.
+        message = AIMessage(
+            content=content,
+            usage_metadata={
+                "input_tokens": self.usage_input_tokens,
+                "output_tokens": self.usage_output_tokens,
+                "total_tokens": self.usage_input_tokens + self.usage_output_tokens,
+            },
+            response_metadata={"model_name": self.model},
+        )
+
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
     def bind_tools(self, tools, *, tool_choice: str | None = None, **kwargs: Any) -> Runnable:
         return self
@@ -137,17 +155,16 @@ class FakeChatModel(BaseChatModel):
 
 @pytest.fixture(autouse=True)
 def reset_aeko():
-    """Keep configuration, tools and sessions from leaking between tests.
+    """Keep configuration and tools from leaking between tests.
 
     `Aeko.reset()` also drops `RUNTIME.agents`, so no test inherits agents
-    another one built (or faked).
+    another one built (or faked). Conversations need no cleanup: they live in
+    the `Session` DTO each test builds, not in the messenger.
     """
 
     Aeko.reset()
-    AekoMessenger._sessions.clear()
     yield
     Aeko.reset()
-    AekoMessenger._sessions.clear()
 
 
 @pytest.fixture
