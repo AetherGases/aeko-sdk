@@ -10,11 +10,15 @@ from aeko.config import (
     AekoMessenger,
     AekoNotConfiguredError,
     AekoTool,
-    InventoryAnalysisResponse,
+    ImprovementPlan,
+    MalformedAgentOutputError,
+    Message,
     MessageResponse,
-    SessionInfo,
+    Session,
     SessionNotPreparedError,
     UnknownAgentError,
+    User,
+    UserMemory,
 )
 
 __all__ = [
@@ -26,9 +30,13 @@ __all__ = [
     "AekoMessenger",
     "AekoNotConfiguredError",
     "AekoTool",
-    "InventoryAnalysisResponse",
+    "ImprovementPlan",
+    "MalformedAgentOutputError",
+    "Message",
     "MessageResponse",
-    "SessionInfo",
+    "Session",
     "SessionNotPreparedError",
     "UnknownAgentError",
+    "User",
+    "UserMemory",
 ]

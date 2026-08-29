@@ -17,6 +17,7 @@ dynamic = ["version"]
 # other LangChain packages does not deadlock a consumer's resolver.
 dependencies = [
     "langchain-core>=1.5.5,<2",
+    "pydantic>=2.9,<3",
     "langchain-classic>=1.0.8,<2",
     "langgraph>=1.2.11,<2",
     "langchain-google-genai>=2.1.12,<3",
