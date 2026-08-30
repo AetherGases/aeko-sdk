@@ -13,7 +13,7 @@ POLLUTANTS_ANALYST_SPEC = PromptSpec(
     ],
     tools=[],
     next_agents=[
-        "Analista de gases verdes - Para recomendar gases verdes e soluções sustentáveis para o processo industrial analisado",
+        "Analista de Gases Verdes - Para recomendar gases verdes e soluções sustentáveis para o processo industrial analisado",
         "Orquestrador - Para devolver a análise final ao usuário."
     ],
     shots=[

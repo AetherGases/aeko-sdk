@@ -182,3 +182,88 @@ def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
     ]
     assert _final_content(result).startswith("Plano:")
     assert result["guard_rail_approved"] is False, "este fluxo nao passa pelo guardrail"
+
+
+INVENTORY_PLAN = "Plano: trocar os queimadores.\nNext agent: Nenhum"
+
+
+@pytest.mark.parametrize(
+    "conversational", ["Orquestrador", "Roteador", "FAQ", "Guardrail de Saída"]
+)
+def test_the_inventory_analyst_cannot_hand_the_report_flow_over(run_graph, conversational):
+    """
+    The report flow ends at the coordinator even when an analyst says otherwise.
+
+    The inventory analyst names the next agent in its own text, so nothing but
+    the graph can stop it from pointing at an agent that belongs to the chat
+    flow. Being routed there would run the report through the guardrail, which
+    this flow is built never to reach.
+    """
+
+    result, llm = run_graph(
+        {
+            "Análista de inventários": f"Escopo 1 = 1.200 tCO2e.\nNext agent: {conversational}",
+            "Coordenador de Melhoria Contínua": INVENTORY_PLAN,
+        },
+        question="| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |",
+        entry_point="Análista de inventários",
+    )
+
+    assert llm.agents_called() == [
+        "Análista de inventários",
+        "Coordenador de Melhoria Contínua",
+    ]
+    assert _final_content(result).startswith("Plano:")
+
+
+def test_a_report_analyst_cannot_hand_the_report_flow_over(run_graph):
+    result, llm = run_graph(
+        {
+            "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
+            "Analista de Poluentes": "CO2 dominante.\nNext agent: FAQ",
+            "Coordenador de Melhoria Contínua": INVENTORY_PLAN,
+        },
+        question="| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |",
+        entry_point="Análista de inventários",
+    )
+
+    assert "FAQ" not in llm.agents_called()
+    assert _final_content(result).startswith("Plano:")
+
+
+@pytest.mark.parametrize("analyst", ["Analista de Poluentes", "Analista de Gases Verdes"])
+def test_an_analyst_naming_itself_does_not_kill_the_report_flow(run_graph, analyst):
+    result, llm = run_graph(
+        {
+            "Análista de inventários": f"Escopo 1 = 1.200 tCO2e.\nNext agent: {analyst}",
+            analyst: f"Analise feita.\nNext agent: {analyst}",
+            "Coordenador de Melhoria Contínua": INVENTORY_PLAN,
+        },
+        question="| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |",
+        entry_point="Análista de inventários",
+    )
+
+    assert llm.agents_called() == [
+        "Análista de inventários",
+        analyst,
+        "Coordenador de Melhoria Contínua",
+    ]
+    assert _final_content(result).startswith("Plano:")
+
+
+def test_an_analyst_naming_itself_does_not_kill_the_chat_flow(run_graph):
+    result, llm = run_graph({
+        **FULL_FLOW,
+        "Analista de Poluentes": "Emissoes criticas.\nNext agent: Analista de Poluentes",
+    })
+
+    assert "Orquestrador" in llm.agents_called()
+    assert _final_content(result).startswith(CONSOLIDATED_ANSWER)
+
+
+def test_the_chat_flow_still_reaches_the_orchestrator(run_graph):
+    _, llm = run_graph(FULL_FLOW)
+
+    assert "Orquestrador" in llm.agents_called(), (
+        "o desvio vale so para o fluxo de relatorio"
+    )

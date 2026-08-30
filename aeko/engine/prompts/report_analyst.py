@@ -11,8 +11,8 @@ REPORT_ANALYST_SPEC = PromptSpec(
     ],
     tools=[],
     next_agents=[
-        "Analista de poluentes - Para analisar os gases poluentes identificados no inventário",
-        "Analista de gases verdes - Para analisar os gases verdes já usados no inventário"
+        "Analista de Poluentes - Para analisar os gases poluentes identificados no inventário",
+        "Analista de Gases Verdes - Para analisar os gases verdes já usados no inventário"
     ],
     shots=[
         {

@@ -1,3 +1,4 @@
+import pytest
 from langgraph.graph import END
 
 from aeko.engine.graph import builder
@@ -69,6 +70,76 @@ def test_route_from_analyst_default_target_also_gets_overridden():
     state = _state(next_agent=None)
 
     assert route(state, _config("Análista de inventários")) == "Coordenador de Melhoria Contínua"
+
+
+@pytest.mark.parametrize(
+    "conversational", ["Orquestrador", "Roteador", "FAQ", "Guardrail de Saída"]
+)
+def test_no_conversational_agent_is_reachable_from_the_report_flow(conversational):
+    """
+    The report flow may only ever move between its own agents.
+
+    Naming anything else means the analysis is over, not that the run should
+    cross into the conversational flow: that flow ends at the guardrail, which
+    the report flow deliberately never passes through.
+    """
+
+    route = builder._route_from_analyst("Orquestrador")
+    state = _state(next_agent={"agent": conversational, "message": "..."})
+
+    assert route(state, _config("Análista de inventários")) == "Coordenador de Melhoria Contínua"
+
+
+@pytest.mark.parametrize("analyst", ["Analista de Poluentes", "Analista de Gases Verdes"])
+def test_the_report_flow_still_moves_between_its_own_analysts(analyst):
+    route = builder._route_from_analyst("Analista de Poluentes")
+    state = _state(next_agent={"agent": analyst, "message": "..."})
+
+    assert route(state, _config("Análista de inventários")) == analyst
+
+
+@pytest.mark.parametrize("target", ["FAQ", "Roteador", "Orquestrador"])
+def test_the_chat_flow_is_left_alone(target):
+    route = builder._route_from_analyst("Orquestrador")
+    state = _state(next_agent={"agent": target, "message": "..."})
+
+    assert route(state, _config("Roteador")) == target
+    assert route(state, _config()) == target
+
+
+@pytest.mark.parametrize("analyst", ["Analista de Poluentes", "Analista de Gases Verdes"])
+def test_an_analyst_naming_itself_is_read_as_having_finished(analyst):
+    """
+    Naming yourself is a non-answer, so it is read as naming nothing at all.
+
+    No prompt offers an agent its own name, and no edge carries one either, so
+    left alone this is not a wrong hop: it is a target the path map does not
+    have, which kills the run.
+    """
+
+    route = builder._route_from_analyst("Orquestrador", current=analyst)
+    state = _state(next_agent={"agent": analyst, "message": "..."})
+
+    assert route(state, _config("Análista de inventários")) == "Coordenador de Melhoria Contínua"
+
+
+def test_an_analyst_naming_itself_in_the_chat_flow_takes_the_default():
+    route = builder._route_from_analyst("Orquestrador", current="Analista de Poluentes")
+    state = _state(next_agent={"agent": "Analista de Poluentes", "message": "..."})
+
+    assert route(state, _config("Roteador")) == "Orquestrador"
+
+
+def test_the_inventory_analyst_edge_accepts_the_coordinator():
+    graph = builder.build_graph()
+
+    ends = set()
+    for branch in graph.branches["Análista de inventários"].values():
+        ends.update(branch.ends or {})
+
+    assert "Coordenador de Melhoria Contínua" in ends, (
+        "sem isso o desvio existe na funcao de rota mas o alvo nao esta no path map"
+    )
 
 
 def test_route_from_guardrail_approved_ends_the_graph():
