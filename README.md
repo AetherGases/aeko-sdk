@@ -17,6 +17,25 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
+## What's new in 2.0
+
+Version 2 reshapes the boundary between the SDK and the API that consumes it. The agent
+system is the same; **how you hand work to it changed, and every change is breaking.**
+
+| Area | 1.x | 2.0 |
+| --- | --- | --- |
+| Data objects | Dataclasses describing a call (`SessionInfo`, `MessageResponse`, …) | Pydantic models mirroring the MongoDB collections, field for field |
+| Session handling | `prepare(session_id, user_info, history)`, then a process-wide session cache | No `prepare()`: the `AekoSession` document travels with every `send_message()` call |
+| Chat result | One `answer` string, always populated | `AekoMessageResponse` — the turn to persist, plus the run's metadata and token cost |
+| Inventory result | Prose the caller had to split apart | `AekoImprovementPlan`, parsed from three fixed sections, with retry |
+| User context | Nothing | `AekoUser.role`/`usecase` and every `AekoUserMemory` reach every agent |
+| Configuration | Several caches, each invalidated by hand | One runtime; writing any setting drops the agents on its own |
+
+If you are coming from 1.x, read [Migrating from 1.x](#migrating-from-1x) — it maps every
+removed name to its replacement.
+
+---
+
 ## Table of contents
 
 - [What the SDK does](#what-the-sdk-does)
@@ -32,6 +51,7 @@ backend — an API, a worker, a notebook — can embed it.
   - [4. The inventory flow](#4-the-inventory-flow)
   - [5. Full example: a stateless FastAPI service](#5-full-example-a-stateless-fastapi-service)
   - [6. Error handling](#6-error-handling)
+- [Migrating from 1.x](#migrating-from-1x)
 - [API reference](#api-reference)
 - [Development](#development)
 - [Resumo em português](#resumo-em-português)
@@ -45,7 +65,7 @@ Aeko exposes two independent entry points into the same agent graph:
 
 | Entry point | Class | Use it for |
 | --- | --- | --- |
-| **Conversation** | `AekoMessenger` | The ESG chatbot: a user message in, a reviewed answer out, with session memory. |
+| **Conversation** | `AekoMessenger` | The ESG chatbot: a user message in, a reviewed answer out, against the session document you pass in. |
 | **Inventory report** | `AekoInventoryAnalyzer` | A GHG inventory in, a full improvement plan out. |
 
 Both share the same agents, the same registered tools and the same configuration. The
@@ -55,7 +75,7 @@ difference is where the run enters the graph and how it ends.
 
 Eight agents, each with its own prompt, persona and tools. Names are in Portuguese
 because they are also the routing keys the graph and `set_tools()` use — pass them
-exactly as written.
+exactly as written, accents included.
 
 | Agent | Role | Model |
 | --- | --- | --- |
@@ -69,7 +89,13 @@ exactly as written.
 | `Coordenador de Melhoria Contínua` | Writes the improvement plan. | slow |
 
 The four cheap agents (classify, consolidate, review) run on `fast_model`; the four
-specialist analysts run on `slow_model`. Both are configurable.
+specialist analysts run on `slow_model`. Both are configurable, and each model is
+registered with the other as its fallback — a provider hiccup degrades a run rather than
+failing it, which is also why a turn can report a model you did not ask for.
+
+Agents hand off to each other by ending their answer with a literal `Next agent: <name>`
+line, which the graph reads and the SDK strips before the text reaches you. It is
+protocol between agents, never part of an answer.
 
 **Conversational flow** — enters at the router, always passes the guardrail:
 
@@ -89,8 +115,9 @@ send_message()
                                                               └──▶ back to Roteador
 ```
 
-If the guardrail keeps rejecting past the retry cap, the run ends with **no** answer:
-`AekoMessageResponse.message.output` is `""` and `approved` is `False`. Always check it.
+The guardrail can send a draft back to the router **3 times**; a fourth rejection ends
+the run with **no** answer at all — `AekoMessageResponse.message.output` is `""` and
+`approved` is `False`. Always check it.
 
 **Inventory flow** — enters at the inventory analyst, ends at a terminal node, so it
 never passes the guardrail:
@@ -104,6 +131,10 @@ analyze()
                                                               ▼
                                         Coordenador de Melhoria Contínua ──▶ plan
 ```
+
+A run that entered here is **confined** to those analysts: an agent naming any other
+successor — or naming itself — is routed to the coordinator instead. Without that, one
+stray handoff would kill the run after every analyst had already been paid for.
 
 ## Requirements
 
@@ -137,8 +168,8 @@ from aeko import (
 Aeko.config("YOUR_GEMINI_API_KEY")
 
 # 2. Chat. The documents come straight out of your database, on every request.
-user = AekoUser.model_validate(db.users.find_one({"_id": user_id}))
-session = AekoSession.model_validate(db.sessions.find_one({"_id": session_id}))
+user = AekoUser.model_validate(db.user.find_one({"_id": user_id}))
+session = AekoSession.model_validate(db.session.find_one({"_id": session_id}))
 memories = [AekoUserMemory.model_validate(document)
             for document in db.user_memory.find({"id_user": user_id})]
 
@@ -151,7 +182,7 @@ print(reply.agents_called)   # e.g. ['FAQ']
 print(reply.approved)        # guardrail verdict
 
 # `reply.message` is one entry of `session.messages`, ready to append.
-db.sessions.update_one(
+db.session.update_one(
     {"_id": session_id}, {"$push": {"messages": reply.message.model_dump()}}
 )
 
@@ -160,7 +191,7 @@ analyzer = AekoInventoryAnalyzer()
 analyzer.set_context("Last report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
 
 plan = analyzer.analyze(inventory_markdown, id_external_inventory=502)
-db.improvement_plans.insert_one(plan.model_dump(by_alias=True, exclude={"id"}))
+db.improvement_plan.insert_one(plan.model_dump(by_alias=True, exclude={"id"}))
 ```
 
 ---
@@ -176,10 +207,10 @@ before writing the integration — they explain every recommendation below.
    `.env` loading. Your application owns its configuration and passes it in through
    `Aeko.config()`. Nothing works until it does.
 2. **Configuration and tools are process-wide.** `Aeko.config()` and
-   `AekoMessenger.set_tools()` mutate a single process-wide runtime and rebuild every
-   agent. Call them **at startup**, not per request. (`set_tools` is a `classmethod` for
-   exactly this reason: registering tools on one instance would silently rebuild the
-   agents behind every other instance's back.)
+   `AekoMessenger.set_tools()` write to a single process-wide runtime, and *any* write to
+   it drops the agents so the next run rebuilds them. Call them **at startup**, not per
+   request. (`set_tools` is a `classmethod` for exactly this reason: registering tools on
+   one instance would silently rebuild the agents behind every other instance's back.)
 3. **The SDK keeps no session state at all.** The conversation lives in the `AekoSession`
    you pass to every `send_message()` call, and the SDK updates that object in place
    before returning. Nothing is cached between calls, so any worker can serve any
@@ -244,6 +275,10 @@ validating input before you get there:
 from aeko import AGENT_NAMES  # ('Roteador', 'FAQ', 'Orquestrador', ...)
 ```
 
+`set_tools()` replaces the whole registry, so pass every agent's tools in one call.
+Appending to an already-registered list is the one write the runtime cannot observe, and
+the agents would go on using the tools they were built with.
+
 ### 3. The conversational flow
 
 ```python
@@ -274,11 +309,12 @@ The two documents your database already holds go in as they are, so there is no 
 agents oldest first. Nothing is kept between calls — pass the session on every request and
 any worker can serve it.
 
-**Only the 10 most recent turns are replayed.** Send the session as long as it is: a
-conversation of 500 turns costs a run exactly what one of 10 does, and you do not have to
-slice anything on the way in. What the SDK caps is what the agents *read*, never what you
-persist — the turn it answers is appended to the session you passed, and every earlier turn
-is still there when the call returns.
+**Only the 10 most recent turns are replayed** (`SESSION_HISTORY_USAGE`, in
+`aeko.config.messenger`). Send the session as long as it is: a conversation of 500 turns
+costs a run exactly what
+one of 10 does, and you do not have to slice anything on the way in. What the SDK caps is
+what the agents *read*, never what you persist — the turn it answers is appended to the
+session you passed, and every earlier turn is still there when the call returns.
 
 `user.role` and `user.usecase` become the business context every agent reads. The
 identifiers (`_id`, `id_external_user`, `id_user`) never reach a prompt: they are there so
@@ -305,7 +341,7 @@ the right conversation. The turn itself mirrors the collection exactly:
 | `input` | What the user sent. |
 | `output` | The final user-facing text, already stripped of the agents' internal routing markers. **Empty when the guardrail never approved a draft.** |
 | `submitted_at` | When the turn was answered (UTC). |
-| `llm` | The model(s) that served the turn, as reported by the provider — comma-separated when a turn crossed both, which it does whenever a specialist analyst was called. |
+| `llm` | The model(s) that served the turn, as reported by the provider — comma-separated when a turn crossed more than one, which it does whenever a specialist analyst was called. |
 | `input_tokens` / `output_tokens` | What the whole run consumed, summed across every agent it called. |
 
 A single turn crosses both configured models — the router, FAQ, orchestrator and guardrail
@@ -386,16 +422,17 @@ Headings rather than a JSON object, for the same reason the agents route on a li
 `Next agent:` line: this flow runs with the report token cap, and a truncated JSON object
 is unparseable and costs the whole plan, while a truncated last section still yields the
 ones written before it. Only those three headings delimit a section, so a subtitle the
-agent writes mid-answer never cuts its own text short.
+agent writes mid-answer never cuts its own text short — and case and accents are ignored
+when matching them, so `## RACIOCINIO` is read as `## Raciocínio`.
 
 An answer that misses a section is **sent back to the coordinator to be rewritten**, with
-the missing headings named and the original request attached, up to four times. The retry
-happens inside the graph and only re-asks the coordinator — the inventory, pollutant and
-green gas analysts already ran, and their findings stay in the state. If the format never
-comes, `analyze()` raises `MalformedAgentOutputError` rather than padding the plan with
-guesses: the SDK will not hand you a plan whose fields it invented. The model is also
-never given a say in `_id` or `updated_at` — only the three content fields are read back
-from it.
+the missing headings named and the original request attached, up to four times
+(`PLAN_FORMAT_MAX_RETRIES`). The retry happens inside the graph and only re-asks the
+coordinator — the inventory, pollutant and green gas analysts already ran, and their
+findings stay in the state. If the format never comes, `analyze()` raises
+`MalformedAgentOutputError` rather than padding the plan with guesses: the SDK will not
+hand you a plan whose fields it invented. The model is also never given a say in `_id` or
+`updated_at` — only the three content fields are read back from it.
 
 Budget for it: a plan that takes every retry costs five coordinator calls at the report
 token cap, on top of the analysts. A well-formed answer costs exactly one.
@@ -558,6 +595,60 @@ empty `message.output` and `approved=False`.
 
 ---
 
+## Migrating from 1.x
+
+Every name below changed in 2.0. There is no deprecation shim: the 1.x calls fail at
+import or call time rather than quietly doing something else.
+
+Every 1.x DTO was a plain dataclass describing a *call*. Every 2.0 DTO is a Pydantic model
+mirroring a *collection*, which is what makes the hand-off to the database lossless.
+
+| 1.x | 2.0 |
+| --- | --- |
+| `SessionInfo(session_id, user_info, turns)` | `AekoSession` — the `session` document itself, `messages` included |
+| `MessageResponse(session_id, answer, ...)` | `AekoMessageResponse` — `.answer` becomes `.message.output`, a full `AekoMessage` |
+| `InventoryAnalysisResponse(answer, agents_called, context_used)` | `AekoImprovementPlan` — three named fields instead of one `answer` blob |
+| — | `AekoUser`, `AekoUserMemory`, `AekoMessage` are new |
+| `SessionNotPreparedError` | removed — there is nothing to prepare |
+| — | `MalformedAgentOutputError` is new |
+| `messenger.prepare(session_id, user_info, history) -> SessionInfo` | removed — construct with `AekoMessenger(user, memories)` |
+| `send_message(text) -> MessageResponse` | `send_message(text, session) -> AekoMessageResponse` |
+| `analyze(inventory) -> InventoryAnalysisResponse` | `analyze(inventory, *, id_external_inventory) -> AekoImprovementPlan` |
+
+**The shape of the change.** In 1.x the messenger owned a process-wide dictionary of
+sessions, and you announced a conversation to it before using it. In 2.0 the conversation
+is a document you already have:
+
+```python
+# 1.x
+messenger = AekoMessenger()
+messenger.prepare(session_id, user_info="ESG analyst", history=[...])
+result = messenger.send_message("Our scope 1 jumped 12%.")
+answer = result.answer
+
+# 2.0
+messenger = AekoMessenger(user, memories)                    # who is asking
+response = messenger.send_message("Our scope 1 jumped 12%.", session)
+answer = response.message.output                             # may be "" — check it
+```
+
+Four consequences worth planning for:
+
+1. **You must persist the session.** The SDK caches nothing, so the turn appended to
+   `session.messages` is lost unless you write it back. In exchange, any worker can serve
+   any conversation.
+2. **`user_info` is now structured.** The free-form string that went into `prepare()` is
+   `AekoUser.role` plus `AekoUser.usecase`, and anything else you were packing into it
+   probably belongs in `AekoUserMemory` — which is rendered in a section of its own.
+3. **An answer can be empty.** `.answer` was always populated; `.message.output` is `""`
+   when the guardrail rejected every draft, and that is a successful run, not an
+   exception. `approved` tells you which happened.
+4. **The improvement plan is structured.** `analyze()` returns `defined_problem`, `method`
+   and `reasoning` instead of one `answer` string, and raises `MalformedAgentOutputError`
+   when the coordinator never produces them — code that used to split the report apart
+   should read the fields directly. `context_used` is gone; you know whether you called
+   `set_context()`.
+
 ## API reference
 
 Everything below is importable directly from `aeko`.
@@ -582,6 +673,7 @@ Everything below is importable directly from `aeko`.
 
 | Member | Signature |
 | --- | --- |
+| *constructor* | `AekoInventoryAnalyzer()` |
 | `set_context` | `set_context(context: str) -> None` |
 | `analyze` | `analyze(inventory: str, *, id_external_inventory: int) -> AekoImprovementPlan` |
 
@@ -598,7 +690,7 @@ MongoDB collection, field for field:
 
 `model_validate(document)` takes a raw document and `model_dump(by_alias=True)` gives one
 back — `_id` included, under that exact name — so the hand-off is lossless in both
-directions. `MessageResponse` (the run's answer plus its metadata) and `AekoTool` are
+directions. `AekoMessageResponse` (the run's answer plus its metadata) and `AekoTool` are
 SDK-only and mirror nothing.
 
 The identifiers (`_id`, `id_external_user`, `id_user`, `id_external_inventory`) and
@@ -632,26 +724,33 @@ session.model_dump(by_alias=True, exclude_none=True)
 `UnknownAgentError`.
 **Constants**: `AGENT_NAMES`, `__version__`.
 
-**Defaults**
+**Defaults and limits**
 
-| Setting | Default |
-| --- | --- |
-| `fast_model` | `gemini-3.1-flash-lite` |
-| `slow_model` | `gemini-3.5-flash` |
-| `max_tokens` | `1024` |
-| `report_max_tokens` | `8192` |
-| Guardrail retry cap | `3` |
+| Setting | Default | Where it lives |
+| --- | --- | --- |
+| `fast_model` | `gemini-3.1-flash-lite` | `Aeko.config()` |
+| `slow_model` | `gemini-3.5-flash` | `Aeko.config()` |
+| `max_tokens` | `1024` | `Aeko.config()` |
+| `report_max_tokens` | `8192` | `Aeko.config()` |
+| Guardrail retry cap | `3` | fixed — `GUARD_RAIL_MAX_RETRIES` |
+| Plan rewrite cap | `4` | fixed — `PLAN_FORMAT_MAX_RETRIES` |
+| Replayed turns | `10` | fixed — `SESSION_HISTORY_USAGE` |
 
 ## Development
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+pip install -e .
 pytest
 ```
 
 The test suite runs against a scripted fake chat model and never calls Gemini, so no API
 key is needed to run it.
+
+`requirements.txt` pins the exact versions the suite is green against; `pyproject.toml`
+declares the same dependencies as ranges, so installing the SDK next to other LangChain
+packages does not deadlock a consumer's resolver.
 
 Releases are published to PyPI by the GitHub Actions workflow in
 `.github/workflows/publish.yml`, triggered when a GitHub Release is published. The release
@@ -693,7 +792,15 @@ plano = analisador.analyze(inventario_em_markdown, id_external_inventory=502)
 db.improvement_plan.insert_one(plano.model_dump(by_alias=True, exclude={"id"}))
 ```
 
-Quatro pontos que definem a integração:
+### O que mudou na 2.0
+
+A fronteira entre o SDK e a API que o consome foi refeita, e **toda mudança quebra
+compatibilidade**: `SessionInfo` e `InventoryAnalysisResponse` saíram, `prepare()` e
+`SessionNotPreparedError` sumiram, `send_message()` passou a receber a sessão e devolver
+`AekoMessageResponse`, e `analyze()` devolve `AekoImprovementPlan`. O mapa completo de
+nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
+
+### Quatro pontos que definem a integração
 
 1. **Configure no startup, nunca por requisição.** `Aeko.config()` e
    `AekoMessenger.set_tools()` alteram um runtime único do processo e reconstroem todos os
@@ -711,9 +818,10 @@ Quatro pontos que definem a integração:
    renderizadas **todas**, sem corte, no contexto que todo agente lê — filtrar as
    expiradas é com a API.
 4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
-   tentativas (limite de 3), o run termina com `message.output == ""` e `approved is
-   False` — verifique sempre antes de persistir. Já um plano de melhoria fora do formato
-   levanta `MalformedAgentOutputError` — depois de o Coordenador ser convidado a reescrever a resposta até quatro vezes —, em vez de devolver campos inventados.
+   tentativas (limite de 3 devoluções), o run termina com `message.output == ""` e
+   `approved is False` — verifique sempre antes de persistir. Já um plano de melhoria fora
+   do formato levanta `MalformedAgentOutputError` — depois de o Coordenador ser convidado a
+   reescrever a resposta até quatro vezes —, em vez de devolver campos inventados.
 
 Os nomes dos agentes (`Roteador`, `FAQ`, `Orquestrador`, `Guardrail de Saída`,
 `Análista de inventários`, `Analista de Poluentes`, `Analista de Gases Verdes`,

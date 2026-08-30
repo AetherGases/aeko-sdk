@@ -256,11 +256,11 @@ class AekoMessenger:
 
         The session is the API's, rehydrated from the "session" collection on
         every request: its `messages` are rendered as the run's conversational
-        context,
-        and the answered turn is appended back to them in place, together with
-        a bumped `updated_at`, so the caller can persist the same object it
-        handed over. Only the `SESSION_HISTORY_USAGE` most recent turns are
-        read back into the run; the session keeps every turn it arrived with.
+        context, and the answered turn is appended back to them in place,
+        together with a bumped `updated_at`, so the caller can persist the same
+        object it handed over. Only the `SESSION_HISTORY_USAGE` most recent
+        turns are read back into the run; the session keeps every turn it
+        arrived with.
 
         Only a final result is recorded. A turn the guardrail never approved
         produces no answer and is left out of the session, so a rejected draft

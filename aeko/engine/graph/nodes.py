@@ -202,8 +202,10 @@ def _specialist_node_factory(agent_name: str, *, terminal: bool = False) -> Call
     can build on its findings) and marks itself no longer pending in
     "pending_agents". It only writes to "messages" when `terminal` is True,
     i.e. when this agent's edge leads directly to END and its output is the
-    literal answer delivered to the user (e.g. the continuous improvement
-    coordinator).
+    literal answer delivered to the user. No analyst wired into the graph is
+    terminal today: the one that ends the report flow is the continuous
+    improvement coordinator, which needs a retry loop and so has a node of its
+    own (see `_coordenador_melhoria_node`).
 
     Args:
         agent_name: The key of the agent this node should invoke.

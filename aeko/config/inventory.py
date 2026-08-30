@@ -127,6 +127,14 @@ class AekoInventoryAnalyzer:
     """
 
     def __init__(self):
+        """
+        Open an analyzer with no previous report to build on.
+
+        Unlike `AekoMessenger`, this takes no user: a plan is produced from the
+        inventory and the previous report alone, and is filed against the
+        inventory rather than against whoever asked for it.
+        """
+
         self._context: str = ""
 
     def set_context(self, context: str) -> None:
