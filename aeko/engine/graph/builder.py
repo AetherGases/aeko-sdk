@@ -8,6 +8,15 @@ from aeko.engine.graph.state import AetherGraphState
 
 GUARD_RAIL_MAX_RETRIES = 3
 
+# The report flow, as the graph knows it: entered here by `AekoInventoryAnalyzer`
+# (which owns the same name as `INVENTORY_ENTRY_POINT` — the engine cannot import
+# it from the SDK facade without a cycle), moving only between these analysts and
+# ending at this coordinator. Every other agent belongs to the conversational
+# flow, which ends at the guardrail this one is built never to reach.
+INVENTORY_ENTRY_POINT = "Análista de inventários"
+REPORT_FLOW_ANALYSTS = ("Analista de Poluentes", "Analista de Gases Verdes")
+IMPROVEMENT_COORDINATOR = "Coordenador de Melhoria Contínua"
+
 
 def _entry_router(state: AetherGraphState, config: RunnableConfig) -> str:
     """
@@ -42,16 +51,30 @@ def _route_by_next_agent(default: str):
     return route
 
 
-def _route_from_analyst(default: str):
+def _route_from_analyst(default: str, *, current: str = ""):
     """
-    Build a router used after a specialist analyst node runs.
+    Build a router used after an analyst node runs.
 
-    Behaves like `_route_by_next_agent`, except that when the graph entered
-    through the inventory analyst and the next target would be "Orquestrador",
-    it redirects to "Coordenador de Melhoria Contínua" instead.
+    Behaves like `_route_by_next_agent`, except that a run which entered through
+    the inventory analyst may only ever move on to another analyst of the report
+    flow. Any other target means the analysis is finished, and the run goes to
+    the improvement coordinator.
+
+    Each agent names its own successor in its own text, so nothing but this
+    stops one of them from pointing at an agent that belongs to the
+    conversational flow — the same reason `_roteador_node` overrides the
+    router's choice in code. Left alone, such a target is not merely the wrong
+    node: it is one the edge's path map does not carry, so the whole run dies on
+    a `KeyError` after every analyst has already been paid for.
+
+    An agent naming itself is read as naming nothing: no prompt offers an agent
+    its own name and no edge carries one, so it is a non-answer rather than a
+    hop, and it takes the same default an empty handoff takes.
 
     Args:
         default: The node to route to when no "next_agent" is set.
+        current: The node this edge leaves from, so its own name can be
+            recognized as a non-answer.
 
     Returns:
         Callable[[AetherGraphState, RunnableConfig], str]: A routing function for
@@ -62,9 +85,12 @@ def _route_from_analyst(default: str):
         next_agent = state.get("next_agent")
         target = next_agent["agent"] if next_agent else default
 
+        if target == current:
+            target = default
+
         entry_point = config.get("configurable", {}).get("entry_point", "Roteador")
-        if target == "Orquestrador" and entry_point == "Análista de inventários":
-            return "Coordenador de Melhoria Contínua"
+        if entry_point == INVENTORY_ENTRY_POINT and target not in REPORT_FLOW_ANALYSTS:
+            return IMPROVEMENT_COORDINATOR
 
         return target
 
@@ -132,16 +158,17 @@ def build_graph() -> StateGraph:
 
     graph.add_conditional_edges(
         "Análista de inventários",
-        _route_by_next_agent("Analista de Poluentes"),
+        _route_from_analyst("Analista de Poluentes", current="Análista de inventários"),
         {
             "Analista de Poluentes": "Analista de Poluentes",
             "Analista de Gases Verdes": "Analista de Gases Verdes",
+            "Coordenador de Melhoria Contínua": "Coordenador de Melhoria Contínua",
         },
     )
 
     graph.add_conditional_edges(
         "Analista de Poluentes",
-        _route_from_analyst("Orquestrador"),
+        _route_from_analyst("Orquestrador", current="Analista de Poluentes"),
         {
             "Analista de Gases Verdes": "Analista de Gases Verdes",
             "Orquestrador": "Orquestrador",
@@ -151,7 +178,7 @@ def build_graph() -> StateGraph:
 
     graph.add_conditional_edges(
         "Analista de Gases Verdes",
-        _route_from_analyst("Orquestrador"),
+        _route_from_analyst("Orquestrador", current="Analista de Gases Verdes"),
         {
             "Analista de Poluentes": "Analista de Poluentes",
             "Orquestrador": "Orquestrador",

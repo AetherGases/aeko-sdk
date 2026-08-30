@@ -1,5 +1,8 @@
 from .builder import PromptSpec, build_prompt
-from .continuous_improvement_coordinator import CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC
+from .continuous_improvement_coordinator import (
+    CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
+    PLAN_SECTIONS,
+)
 from .faq import FAQ_SPEC
 from .green_gases_analyst import GREEN_GASES_ANALYST_SPEC
 from .orchestrator import ORCHESTRATOR_SPEC
@@ -39,6 +42,7 @@ __all__ = [
     "GREEN_GASES_ANALYST_SPEC",
     "ORCHESTRATOR_SPEC",
     "OUTPUT_GUARDRAIL_SPEC",
+    "PLAN_SECTIONS",
     "POLLUTANTS_ANALYST_SPEC",
     "PROMPT_SPECS",
     "PromptSpec",
