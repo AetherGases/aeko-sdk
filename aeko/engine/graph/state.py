@@ -38,10 +38,28 @@ def _merge_pending_agents(current: list[dict[str, str]], update: list[dict[str, 
 
 
 class NextAgent(TypedDict):
+    """
+    The handoff one agent declared, read back from its "Next agent:" line.
+
+    Attributes:
+        agent: The name of the agent to run next, always one of `AGENT_NAMES`
+            (`_invoke_agent` rejects anything else).
+        message: The output the handoff was parsed out of, kept so a router can
+            see what was said, not just where it points.
+    """
+
     agent: str
     message: str
 
 class PendingAgents(TypedDict):
+    """
+    Whether an agent still owes the run an answer.
+
+    Attributes:
+        agent: The agent's name.
+        is_still_pending: False once the agent has run and recorded its output.
+    """
+
     agent: str
     is_still_pending: bool
 
