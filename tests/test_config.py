@@ -14,6 +14,7 @@ from aeko import (
     AekoSession,
     AekoTool,
     AekoUser,
+    AekoUserMemory,
 )
 from aeko.config.exceptions import (
     AekoNotConfiguredError,
@@ -97,6 +98,36 @@ INVENTORY_FLOW = {
 
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
 
+# Three of them on purpose: the objective is *every* memory reaching the prompt,
+# so a rendering that silently kept only the first (or only the most recent)
+# has to fail here.
+MEMORY_DOCS = [
+    {
+        "_id": "64b8f0a1c9e1a2b3c4d5e6f2",
+        "id_user": USER_ID,
+        "field": "preferred_language",
+        "description": "Prefere respostas em portugues",
+        "created_at": "2026-08-28T12:00:00Z",
+        "expires_at": "2027-08-28T12:00:00Z",
+    },
+    {
+        "_id": "64b8f0a1c9e1a2b3c4d5e6f5",
+        "id_user": USER_ID,
+        "field": "detail_level",
+        "description": "Pede numeros e nao prosa longa",
+        "created_at": "2026-08-28T12:01:00Z",
+        "expires_at": None,
+    },
+    {
+        "_id": "64b8f0a1c9e1a2b3c4d5e6f6",
+        "id_user": USER_ID,
+        "field": "planta",
+        "description": "Opera dois fornos a gas natural em Sorocaba",
+        "created_at": "2026-08-28T12:02:00Z",
+        "expires_at": None,
+    },
+]
+
 
 @tool
 def consulta_precos(query: str) -> str:
@@ -115,6 +146,12 @@ def make_user(**overrides) -> AekoUser:
         "usecase": "Acompanha a substituicao de gases dos fornos.",
         **overrides,
     })
+
+
+def make_memories() -> list[AekoUserMemory]:
+    """The user's memories, as the API would have read them from "user_memory"."""
+
+    return [AekoUserMemory.model_validate(document) for document in MEMORY_DOCS]
 
 
 def make_session(**overrides) -> AekoSession:
@@ -143,9 +180,9 @@ def messenger(configured, use_fake_llm):
     belongs to.
     """
 
-    def _build(responses, user=None):
+    def _build(responses, user=None, memories=None):
         llm = use_fake_llm(responses)
-        return AekoMessenger(user or make_user()), llm
+        return AekoMessenger(user or make_user(), memories=memories), llm
 
     return _build
 
@@ -331,13 +368,94 @@ def test_registered_tools_reach_the_agent_that_answers(messenger):
     assert "consulta_precos - Consulta o preco medio." in llm.system_prompt_for("FAQ")
 
 
-def test_the_agents_are_told_to_consult_the_user_memories(messenger):
+# --- the user memories ---------------------------------------------------
+
+
+def test_every_memory_reaches_the_agents(messenger):
+    instance, llm = messenger(CHAT_FLOW, memories=make_memories())
+
+    instance.send_message("O que e hidrogenio verde?", make_session())
+
+    for agent in ("Roteador", "FAQ"):
+        prompt = llm.prompt_for(agent)
+        for document in MEMORY_DOCS:
+            assert document["description"] in prompt, (
+                f"a memoria {document['field']!r} nao chegou ao {agent}"
+            )
+
+
+def test_the_memories_reach_the_specialists_and_the_orchestrator(messenger):
+    instance, llm = messenger(ANALYSIS_FLOW, memories=make_memories())
+
+    instance.send_message("Analise meus fornos.", make_session())
+
+    for agent in ("Analista de Poluentes", "Orquestrador"):
+        assert "Opera dois fornos a gas natural" in llm.prompt_for(agent), (
+            f"todo agente do fluxo le o mesmo contexto; o {agent} nao pode ser excecao"
+        )
+
+
+def test_the_memories_are_rendered_as_field_and_description(messenger):
+    instance, llm = messenger(CHAT_FLOW, memories=make_memories())
+
+    instance.send_message("O que e hidrogenio verde?", make_session())
+
+    prompt = llm.prompt_for("Roteador")
+
+    assert "Memórias do usuário:" in prompt, "as memorias precisam de um rotulo proprio"
+    assert "preferred_language: Prefere respostas em portugues" in prompt, (
+        "a linha e a mesma que AekoUserMemory.to_prompt_line() ja produzia"
+    )
+
+
+def test_a_user_without_memories_renders_no_memory_section(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
     instance.send_message("O que e hidrogenio verde?", make_session())
 
-    assert "memórias do usuário" in llm.system_prompt_for("FAQ"), (
-        "as memorias chegam por tool registrada pela API, e o prompt precisa manda-la consultar"
+    prompt = llm.prompt_for("Roteador")
+
+    assert "Memórias do usuário:" not in prompt, (
+        "sem memorias nao ha secao vazia para o modelo interpretar"
+    )
+    assert "Gestor ambiental da Ceramica X" in prompt, "o resto do contexto continua"
+
+
+def test_the_memories_keep_their_bookkeeping_fields_out_of_the_prompt(messenger):
+    instance, llm = messenger(CHAT_FLOW, memories=make_memories())
+
+    instance.send_message("O que e hidrogenio verde?", make_session())
+
+    prompt = llm.prompt_for("Roteador")
+
+    for document in MEMORY_DOCS:
+        assert document["_id"] not in prompt, "o _id e do banco, nao do modelo"
+
+    assert "2027" not in prompt, "a validade e filtro da API, nao decisao do modelo"
+
+
+def test_the_prompts_no_longer_delegate_the_memories_to_a_tool(messenger):
+    instance, llm = messenger(CHAT_FLOW, memories=make_memories())
+
+    instance.send_message("O que e hidrogenio verde?", make_session())
+
+    for agent in ("Roteador", "FAQ"):
+        system_prompt = llm.system_prompt_for(agent)
+        assert "ferramenta de memórias" not in system_prompt, (
+            "as memorias chegam no proprio contexto; nao ha tool a consultar"
+        )
+        assert "memórias do usuário" in system_prompt, (
+            "o agente ainda precisa ser mandado respeitar as memorias que recebeu"
+        )
+
+
+def test_the_guardrail_reviews_the_draft_without_the_memories(messenger):
+    instance, llm = messenger(ANALYSIS_FLOW, memories=make_memories())
+
+    instance.send_message("Analise meus fornos.", make_session())
+
+    assert "Prefere respostas em portugues" not in llm.prompt_for("Guardrail de Saída"), (
+        "o guardrail julga o rascunho contra a pergunta e as analises, e so"
     )
 
 

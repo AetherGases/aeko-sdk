@@ -28,29 +28,6 @@ def _max_tokens_from(config: RunnableConfig | None) -> int:
     return (config or {}).get("configurable", {}).get("max_tokens") or RUNTIME.max_tokens
 
 
-def _format_history(messages: list) -> str:
-    """
-    Format prior conversation turns as a "Usuário:"/"Assistente:" transcript.
-
-    Args:
-        messages: The prior messages, oldest first.
-
-    Returns:
-        str: One labelled line per turn.
-    """
-
-    lines = []
-    for message in messages:
-        if isinstance(message, dict):
-            role, content = message.get("role", "user"), message.get("content", "")
-        else:
-            role, content = getattr(message, "type", "human"), getattr(message, "content", "")
-
-        lines.append(f"{'Usuário' if role in ('human', 'user') else 'Assistente'}: {content}")
-
-    return "\n".join(lines)
-
-
 def _format_findings(previous_agents: dict[str, str]) -> str:
     """
     Format previous_agents entries as a "- name: output" bullet list.
@@ -71,12 +48,12 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
 
     Every agent's own prompt is designed (see its few-shot examples in
     aeko/engine/prompts/) around a single self-contained human turn, never
-    around replaying another agent's raw output as chat history. Feeding an
-    agent the accumulated `state["messages"]` would eventually end on another
-    agent's "ai" turn, which Gemini silently answers with empty content, and
-    also blurs each agent's persona with whatever it reads as "said by the
-    user". Building this message from `initial_question` plus a structured
-    summary of `previous_agents` avoids both problems.
+    around replaying another agent's raw output as chat history. Handing an
+    agent a running transcript would eventually end on another agent's "ai"
+    turn, which Gemini silently answers with empty content, and also blurs each
+    agent's persona with whatever it reads as "said by the user". Building this
+    message from `initial_question` plus a structured summary of
+    `previous_agents` avoids both problems.
 
     Also includes the Guardrail's most recent rejection feedback, if any, so
     that whoever is invoked next (typically the Roteador, deciding where to
@@ -87,7 +64,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
         state: The current graph state.
 
     Returns:
-        HumanMessage: The company context and prior conversation turns, the
+        HumanMessage: The company context and the prior conversation, the
             original question, a summary of any specialist findings gathered so
             far, and the latest guardrail feedback.
     """
@@ -98,12 +75,11 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     if company_context:
         parts.append(f"Contexto da empresa/usuário:\n{company_context}")
 
-    # The current question is already in `initial_question`; everything before
-    # it is the prior conversation. It is replayed whole: whoever owns the
-    # conversation decides how many turns are worth seeding into the state.
-    history = (state.get("messages") or [])[:-1]
+    # Replayed whole: whoever owns the conversation is the one that decides how
+    # many turns are worth replaying, and renders them (see `SESSION_HISTORY_USAGE`).
+    history = state.get("history") or ""
     if history:
-        parts.append(f"Histórico da conversa:\n{_format_history(history)}")
+        parts.append(f"Histórico da conversa:\n{history}")
 
     parts.append(state["initial_question"])
 

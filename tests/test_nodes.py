@@ -66,9 +66,7 @@ def test_build_context_message_replays_the_whole_history_it_was_given():
     # Trimming is decided once, when the facade seeds the state from the
     # session (see `SESSION_HISTORY_USAGE`), so the node replays whatever it
     # was handed instead of applying a second, competing cut of its own.
-    history = [
-        HumanMessage(content=f"pergunta {n}") for n in range(30)
-    ]
+    history = "\n".join(f"Usuário: pergunta {n}" for n in range(30))
     state = create_initial_state("Pergunta de teste", history=history)
 
     message = nodes._build_context_message(state)

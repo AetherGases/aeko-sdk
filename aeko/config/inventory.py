@@ -189,7 +189,7 @@ class AekoInventoryAnalyzer:
         )
 
         messages = result.get("messages") or []
-        final = messages[-1] if len(messages) > len(state["messages"]) else None
+        final = messages[-1] if messages else None
         answer = "" if final is None else strip_routing_marker(
             final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
         )
