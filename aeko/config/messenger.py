@@ -1,7 +1,6 @@
 from typing import Any, Sequence
 
 from langchain_core.callbacks import get_usage_metadata_callback
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from aeko.config._text import strip_routing_marker
 from aeko.config.dto import (
@@ -19,18 +18,17 @@ from aeko.engine.prompts import AGENT_NAMES
 from aeko.engine.runtime import RUNTIME
 
 
-def _final_answer(result: dict, seeded: int) -> str:
+def _final_answer(result: dict) -> str:
     """
     Extract the user-facing answer a run produced, if it produced one.
 
-    Only terminal nodes and an approved guardrail append to "messages" (see
-    aeko/engine/graph/nodes.py). A run that ends without reaching any of them
-    — the guardrail rejecting past its retry cap — leaves "messages" exactly as
-    it was seeded, and has no answer to report.
+    A run's "messages" starts empty and only a terminal node or an approved
+    guardrail ever writes to it (see aeko/engine/graph/nodes.py), so a run that
+    ends without reaching any of them — the guardrail rejecting past its retry
+    cap — leaves it empty, and has no answer to report.
 
     Args:
         result: The graph's final state.
-        seeded: How many messages the run started with.
 
     Returns:
         str: The final answer, stripped of the agents' routing marker, or an
@@ -38,7 +36,7 @@ def _final_answer(result: dict, seeded: int) -> str:
     """
 
     messages = result.get("messages") or []
-    if len(messages) <= seeded:
+    if not messages:
         return ""
 
     final = messages[-1]
@@ -80,34 +78,39 @@ def _agents_called(result: dict) -> list[str]:
 SESSION_HISTORY_USAGE = 10
 
 
-def _history_from(session: AekoSession) -> list[BaseMessage]:
+def _history_from(session: AekoSession) -> str:
     """
-    Rebuild the conversation the graph should see from a session document.
+    Render the conversation the agents should read from a session document.
 
     Only the `SESSION_HISTORY_USAGE` most recent turns are replayed, however
     many the session carries — a conversation of 500 turns costs the same as
     one of 10. Each persisted turn holds both sides of the exchange, so one
-    entry of "session.messages" becomes a human message followed by the
-    assistant's reply. A turn the guardrail never approved has an empty
+    entry of "session.messages" becomes a "Usuário:" line followed by an
+    "Assistente:" one. A turn the guardrail never approved has an empty
     `output` and contributes only the question, which is exactly how it was
     stored.
+
+    The transcript is rendered here, where the turns actually live, rather than
+    seeded into the graph as messages for a node to flatten back into text: no
+    agent is ever invoked with a running transcript (see
+    `_build_context_message`), so that intermediate form had no reader.
 
     Args:
         session: The session as the API read it from the database.
 
     Returns:
-        list[BaseMessage]: The most recent turns as LangChain messages, oldest
-            first.
+        str: One labelled line per side of each replayed turn, oldest first,
+            empty for a conversation that has none.
     """
 
-    messages: list[BaseMessage] = []
+    lines: list[str] = []
 
     for turn in session.messages[-SESSION_HISTORY_USAGE:]:
-        messages.append(HumanMessage(content=turn.input))
+        lines.append(f"Usuário: {turn.input}")
         if turn.output:
-            messages.append(AIMessage(content=turn.output))
+            lines.append(f"Assistente: {turn.output}")
 
-    return messages
+    return "\n".join(lines)
 
 
 # The label the memories are rendered under, inside the context every agent
@@ -252,7 +255,8 @@ class AekoMessenger:
         Send a user message through the graph and return the reviewed answer.
 
         The session is the API's, rehydrated from the "session" collection on
-        every request: its `messages` seed the run's conversational context,
+        every request: its `messages` are rendered as the run's conversational
+        context,
         and the answered turn is appended back to them in place, together with
         a bumped `updated_at`, so the caller can persist the same object it
         handed over. Only the `SESSION_HISTORY_USAGE` most recent turns are
@@ -286,7 +290,7 @@ class AekoMessenger:
                 state, config={"configurable": {"entry_point": "Roteador"}}
             )
 
-        answer = _final_answer(result, seeded=len(state["messages"]))
+        answer = _final_answer(result)
         llm, input_tokens, output_tokens = _usage_of(usage.usage_metadata)
 
         turn = AekoMessage(

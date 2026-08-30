@@ -86,9 +86,9 @@ def test_graph_invocation_writes_result_to_file(run_graph):
     # Only terminal nodes (FAQ, Coordenador de Melhoria Contínua) and an
     # approved Guardrail write to "messages" (see nodes.py). If the run ends
     # without ever reaching one of those - e.g. the guardrail rejects past the
-    # retry cap - "messages" never grows past the original question, and there
-    # is no real final answer to report.
-    assert len(result["messages"]) > 1, (
+    # retry cap - "messages" stays empty, and there is no real final answer
+    # to report.
+    assert result["messages"], (
         "O grafo terminou sem produzir uma resposta final aprovada "
         "(guardrail provavelmente reprovou ate o limite de retries)."
     )
@@ -152,7 +152,7 @@ def test_rejected_answer_never_reaches_the_user(run_graph):
     result, _ = run_graph(REJECTING_FLOW)
 
     assert result["guard_rail_approved"] is False
-    assert len(result["messages"]) == 1, "um rascunho reprovado nao pode virar resposta"
+    assert not result["messages"], "um rascunho reprovado nao pode virar resposta"
 
 
 def test_guardrail_retries_are_capped(run_graph):
