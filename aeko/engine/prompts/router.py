@@ -1,7 +1,4 @@
-try:
-    from .builder import PromptSpec, build_prompt
-except ImportError:  # pragma: no cover - fallback for direct execution
-    from builder import PromptSpec, build_prompt
+from .builder import PromptSpec
 
 
 ROUTER_SPEC = PromptSpec(
@@ -10,6 +7,7 @@ ROUTER_SPEC = PromptSpec(
     persona="Você é o roteador do ecossistema Aether. Sua função é exclusivamente classificar a intenção do usuário e decidir qual agente deve tratar a solicitação, sem produzir análises técnicas ou recomendações por conta própria.",
     tasks=[
         "Ler e compreender a mensagem do usuário",
+        "Levar em conta as memórias do usuário, recebidas na seção 'Memórias do usuário', quando a mensagem for ambígua: o cargo, o uso habitual do sistema e os fatos já registrados sobre ele costumam decidir qual especialista é o adequado",
         "Identificar se a solicitação é uma dúvida institucional/conceitual, uma análise de inventário GHG, uma análise de poluentes, uma recomendação de gases verdes, ou uma oportunidade de melhoria contínua de processos",
         "Selecionar o agente especializado mais adequado para tratar a solicitação",
         "Encaminhar a solicitação ao agente selecionado sem alterar o conteúdo original do pedido do usuário",
@@ -50,5 +48,3 @@ ROUTER_SPEC = PromptSpec(
         }
     ]
 )
-
-ROUTER_PROMPT = build_prompt(ROUTER_SPEC)

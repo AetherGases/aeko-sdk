@@ -1,8 +1,5 @@
 from typing import Annotated, TypedDict
 
-from typing import Any, Sequence
-
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import MessagesState
 
 
@@ -41,15 +38,46 @@ def _merge_pending_agents(current: list[dict[str, str]], update: list[dict[str, 
 
 
 class NextAgent(TypedDict):
+    """
+    The handoff one agent declared, read back from its "Next agent:" line.
+
+    Attributes:
+        agent: The name of the agent to run next, always one of `AGENT_NAMES`
+            (`_invoke_agent` rejects anything else).
+        message: The output the handoff was parsed out of, kept so a router can
+            see what was said, not just where it points.
+    """
+
     agent: str
     message: str
 
 class PendingAgents(TypedDict):
+    """
+    Whether an agent still owes the run an answer.
+
+    Attributes:
+        agent: The agent's name.
+        is_still_pending: False once the agent has run and recorded its output.
+    """
+
     agent: str
     is_still_pending: bool
 
 class AetherGraphState(MessagesState):
+    """
+    The state one graph run carries.
+
+    "messages" is inherited from MessagesState but is an *output* channel here,
+    not a transcript: it starts empty and only a terminal node or an approved
+    guardrail ever writes to it (see aeko/engine/graph/nodes.py), so "the run
+    produced a user-facing answer" is exactly "messages is not empty". No agent
+    is ever invoked with it — each one gets a single isolated message built by
+    `_build_context_message`, and the prior conversation reaches them through
+    "history" instead, already rendered as the text they read.
+    """
+
     initial_question: str
+    history: str
     previous_agents: Annotated[dict[str, str], _merge_previous_agents]
     next_agent: NextAgent | None
     pending_agents: Annotated[list[PendingAgents], _merge_pending_agents]
@@ -59,50 +87,19 @@ class AetherGraphState(MessagesState):
     company_context: str
 
 
-def history_to_messages(history: Sequence[Any] | None) -> list[BaseMessage]:
-    """
-    Convert caller-supplied conversation history into LangChain messages.
-
-    The SDK is consumed by an API that owns persistence, so a session may have
-    to be rebuilt from turns held elsewhere (a database, another worker). This
-    accepts both already-built messages and plain {"role", "content"} dicts.
-
-    Args:
-        history: Prior turns, oldest first, or None.
-
-    Returns:
-        list[BaseMessage]: The converted messages, in the same order.
-    """
-
-    if not history:
-        return []
-
-    messages: list[BaseMessage] = []
-    for turn in history:
-        if isinstance(turn, BaseMessage):
-            messages.append(turn)
-            continue
-
-        role = turn.get("role", "user")
-        content = turn.get("content", "")
-        messages.append(
-            HumanMessage(content=content) if role in ("user", "human")
-            else AIMessage(content=content)
-        )
-
-    return messages
-
-
 def create_initial_state(initial_question: str, company_context: str = "",
-                         history: Sequence[Any] | None = None) -> AetherGraphState:
+                         history: str = "") -> AetherGraphState:
     """
     Build the initial graph state for a new conversation.
 
     Args:
-        initial_question: The user's opening question, seeded as the last message.
+        initial_question: The user's opening question.
         company_context: Optional context about the requesting company.
-        history: Optional prior turns to seed before the question, so a session
-            resumed from outside the process keeps its conversational context.
+        history: Optional prior turns, already rendered as the transcript the
+            agents read, so a session resumed from outside the process keeps
+            its conversational context. The SDK is consumed by an API that owns
+            persistence, so the caller is the one that knows how much of it is
+            worth replaying (see `AekoMessenger._history_from`).
 
     Returns:
         AetherGraphState: A fully-populated initial state with empty defaults.
@@ -112,8 +109,9 @@ def create_initial_state(initial_question: str, company_context: str = "",
     # in the class body is a dead class attribute, never applied to instances.
     # This factory is the only place defaults are actually populated.
     return AetherGraphState(
-        messages=[*history_to_messages(history), HumanMessage(content=initial_question)],
+        messages=[],
         initial_question=initial_question,
+        history=history,
         previous_agents={},
         next_agent=None,
         pending_agents=[],

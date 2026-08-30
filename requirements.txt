@@ -1,5 +1,9 @@
+# Exact versions the test suite runs green against, for development and CI.
+# `pyproject.toml` declares the same dependencies as ranges, so installing the
+# SDK next to other LangChain packages does not deadlock a consumer's resolver.
 # Requires Python >=3.11,<3.12
-langchain-core==1.5.5
+langchain-core==1.6.1
+pydantic==2.13.5
 langchain-classic==1.0.8
 langgraph==1.2.11
 langchain-google-genai==2.1.12

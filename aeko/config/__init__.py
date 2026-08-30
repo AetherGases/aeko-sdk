@@ -1,14 +1,17 @@
 from aeko.config.aeko import Aeko
 from aeko.config.dto import (
+    AekoImprovementPlan,
+    AekoMessage,
+    AekoMessageResponse,
+    AekoSession,
     AekoTool,
-    InventoryAnalysisResponse,
-    MessageResponse,
-    SessionInfo,
+    AekoUser,
+    AekoUserMemory,
 )
 from aeko.config.exceptions import (
     AekoError,
     AekoNotConfiguredError,
-    SessionNotPreparedError,
+    MalformedAgentOutputError,
     UnknownAgentError,
 )
 from aeko.config.inventory import AekoInventoryAnalyzer
@@ -19,13 +22,16 @@ __all__ = [
     "AGENT_NAMES",
     "Aeko",
     "AekoError",
+    "AekoImprovementPlan",
     "AekoInventoryAnalyzer",
+    "AekoMessage",
+    "AekoMessageResponse",
     "AekoMessenger",
     "AekoNotConfiguredError",
+    "AekoSession",
     "AekoTool",
-    "InventoryAnalysisResponse",
-    "MessageResponse",
-    "SessionInfo",
-    "SessionNotPreparedError",
+    "AekoUser",
+    "AekoUserMemory",
+    "MalformedAgentOutputError",
     "UnknownAgentError",
 ]

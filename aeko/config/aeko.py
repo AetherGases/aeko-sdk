@@ -32,18 +32,13 @@ class Aeko:
         if not api_key or not isinstance(api_key, str):
             raise AekoNotConfiguredError("Aeko.config() requires a non-empty API key.")
 
-        RUNTIME.api_key = api_key
-
-        if fast_model:
-            RUNTIME.fast_model = fast_model
-        if slow_model:
-            RUNTIME.slow_model = slow_model
-        if max_tokens:
-            RUNTIME.max_tokens = max_tokens
-        if report_max_tokens:
-            RUNTIME.report_max_tokens = report_max_tokens
-
-        RUNTIME.notify_changed()
+        RUNTIME.configure(
+            api_key=api_key,
+            fast_model=fast_model,
+            slow_model=slow_model,
+            max_tokens=max_tokens,
+            report_max_tokens=report_max_tokens,
+        )
 
     @staticmethod
     def is_configured() -> bool:

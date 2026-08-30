@@ -3,7 +3,16 @@ import time
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from aeko.engine.prompts import builder
+import pytest
+
+from aeko.config._text import parse_sections
+from aeko.engine.prompts import (
+    AGENT_NAMES,
+    CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
+    PLAN_SECTIONS,
+    PROMPT_SPECS,
+    builder,
+)
 from aeko.engine.prompts.builder import build_prompt
 
 
@@ -101,6 +110,45 @@ def test_build_prompt_tolerates_literal_braces_in_free_text_content():
     system_content = _system_content(prompt_template)
 
     assert "{valor}" in system_content
+
+
+@pytest.mark.parametrize("agent", list(PROMPT_SPECS))
+def test_every_prompt_offers_only_real_agent_names(agent):
+    """
+    A name an agent is offered has to be a name the graph can route by.
+
+    Each spec's "next_agents" is rendered into the prompt's "# Agentes
+    disponiveis" section, and "# Formato da Resposta" tells the agent to answer
+    with exactly one of those names. `_invoke_agent` then looks that name up in
+    the agent registry, case included, so a name written differently here is one
+    the run dies on precisely when the model obeys its instructions.
+    """
+
+    offered = [entry.split(" - ")[0].strip() for entry in PROMPT_SPECS[agent].next_agents]
+    unknown = [name for name in offered if name not in AGENT_NAMES]
+
+    assert not unknown, f"{agent} oferece nomes que nao existem no registro: {unknown}"
+
+
+def test_the_coordinator_is_told_to_answer_in_the_plan_sections():
+    system_content = _system_content(build_prompt(CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC))
+
+    for label in PLAN_SECTIONS.values():
+        assert f"## {label}" in system_content
+
+
+def test_every_coordinator_shot_is_readable_by_the_plan_parser():
+    """
+    The shots are what actually decide the answer's shape, so the parser has to
+    agree with all six of them — an instruction the examples contradict is an
+    instruction the model ignores.
+    """
+
+    for shot in CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC.shots:
+        sections = parse_sections(shot["resposta"], PLAN_SECTIONS)
+
+        assert set(sections) == set(PLAN_SECTIONS)
+        assert all(sections.values())
 
 
 def test_build_prompt_recomputes_temporal_context_on_each_render():

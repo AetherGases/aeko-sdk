@@ -6,6 +6,7 @@ from langchain_core.tools import tool
 
 from aeko.config.dto import AekoTool
 from aeko.engine.agents.agents import FAST_AGENTS, create_agents
+from aeko.engine.runtime import RUNTIME
 
 from tests.conftest import PERSONA_MARKER
 
@@ -95,18 +96,22 @@ def test_agents_have_no_tools_by_default(agents):
 
 
 def test_registered_tools_are_bound_to_their_agent(identity_llm):
-    agents = create_agents({"Analista de Poluentes": [AekoTool(tool=consulta_precos)]})
+    RUNTIME.configure(tools={"Analista de Poluentes": [AekoTool(tool=consulta_precos)]})
+
+    agents = create_agents()
 
     assert [t.name for t in agents["Analista de Poluentes"].tools] == ["consulta_precos"]
     assert agents["FAQ"].tools == []
 
 
 def test_registered_tools_are_described_in_the_prompt(identity_llm):
-    agents = create_agents({
+    RUNTIME.configure(tools={
         "Analista de Poluentes": [
             AekoTool(tool=consulta_precos, description="Consulta o preco medio de mitigacoes."),
         ],
     })
+
+    agents = create_agents()
 
     prompt = _system_prompt(agents["Analista de Poluentes"])
 
@@ -115,13 +120,17 @@ def test_registered_tools_are_described_in_the_prompt(identity_llm):
 
 
 def test_tool_description_falls_back_to_the_tools_own(identity_llm):
-    agents = create_agents({"FAQ": [AekoTool(tool=consulta_precos)]})
+    RUNTIME.configure(tools={"FAQ": [AekoTool(tool=consulta_precos)]})
+
+    agents = create_agents()
 
     assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(agents["FAQ"])
 
 
 def test_bare_langchain_tools_are_accepted(identity_llm):
-    agents = create_agents({"FAQ": [consulta_precos]})
+    RUNTIME.configure(tools={"FAQ": [consulta_precos]})
+
+    agents = create_agents()
 
     assert [t.name for t in agents["FAQ"].tools] == ["consulta_precos"]
     assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(agents["FAQ"])

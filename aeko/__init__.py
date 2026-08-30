@@ -1,19 +1,22 @@
 """Aeko SDK - the Aether multi-agent core."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 from aeko.config import (
     AGENT_NAMES,
     Aeko,
     AekoError,
+    AekoImprovementPlan,
     AekoInventoryAnalyzer,
+    AekoMessage,
+    AekoMessageResponse,
     AekoMessenger,
     AekoNotConfiguredError,
+    AekoSession,
     AekoTool,
-    InventoryAnalysisResponse,
-    MessageResponse,
-    SessionInfo,
-    SessionNotPreparedError,
+    AekoUser,
+    AekoUserMemory,
+    MalformedAgentOutputError,
     UnknownAgentError,
 )
 
@@ -22,13 +25,16 @@ __all__ = [
     "AGENT_NAMES",
     "Aeko",
     "AekoError",
+    "AekoImprovementPlan",
     "AekoInventoryAnalyzer",
+    "AekoMessage",
+    "AekoMessageResponse",
     "AekoMessenger",
     "AekoNotConfiguredError",
+    "AekoSession",
     "AekoTool",
-    "InventoryAnalysisResponse",
-    "MessageResponse",
-    "SessionInfo",
-    "SessionNotPreparedError",
+    "AekoUser",
+    "AekoUserMemory",
+    "MalformedAgentOutputError",
     "UnknownAgentError",
 ]

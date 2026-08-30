@@ -3,35 +3,32 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from aeko.engine.runtime import RUNTIME
 
 
-def create_llms(api_key: str | None = None, *, fast_model: str | None = None,
-                slow_model: str | None = None, max_tokens: int | None = None):
+def create_llms(max_tokens: int | None = None):
     """
     Create the fast and slow chat models used across the agent system.
 
-    Every setting falls back to the process-wide runtime configured through
+    Every setting comes from the process-wide runtime configured through
     `Aeko.config()`. There is deliberately no environment-variable fallback for
     the API key: the SDK is consumed by an API that passes the key in, and a
     silent fallback would let a misconfigured deployment run against the wrong
     credentials instead of failing loudly.
 
     Args:
-        api_key: The Gemini API key. Defaults to the configured one.
-        fast_model: Model id for the fast LLM. Defaults to the configured one.
-        slow_model: Model id for the slow LLM. Defaults to the configured one.
         max_tokens: Output token cap for both models. Defaults to the
-            configured conversational cap.
+            configured conversational cap, which is how the inventory report
+            flow asks for more room than a chat answer.
 
     Returns:
         tuple[BaseChatModel, BaseChatModel]: The fast LLM (with the slow LLM as
             fallback) and the slow LLM (with the fast LLM as fallback).
 
     Raises:
-        AekoNotConfiguredError: If no API key was given or configured.
+        AekoNotConfiguredError: If no API key was configured.
     """
 
-    api_key = api_key or RUNTIME.require_api_key()
-    fast_model = fast_model or RUNTIME.fast_model
-    slow_model = slow_model or RUNTIME.slow_model
+    api_key = RUNTIME.require_api_key()
+    fast_model = RUNTIME.fast_model
+    slow_model = RUNTIME.slow_model
     max_tokens = max_tokens or RUNTIME.max_tokens
 
     fast_llm = ChatGoogleGenerativeAI(

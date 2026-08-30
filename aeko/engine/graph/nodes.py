@@ -1,57 +1,20 @@
-from typing import Any, Callable
+from typing import Callable
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from aeko.engine.graph.state import AetherGraphState, NextAgent
-from aeko.engine.agents.agents import create_agents
 from aeko.engine.runtime import RUNTIME
 
-# Agents used to be built at import time, which made `Aeko.config()` useless:
-# by the time the consuming API supplied its API key, the LLMs had already been
-# instantiated without one. They are now built on first use and rebuilt whenever
-# the runtime configuration changes.
-#
-# `_AGENTS` stays a module-level dict so it can still be swapped wholesale in
-# tests; when it is non-empty, it wins over the lazily built registry.
-_AGENTS: dict[str, Any] = {}
-
-# Keyed by output token cap: the conversational flow and the inventory report
-# flow share the same agents but not the same room to answer.
-_AGENT_CACHE: dict[int | None, dict[str, Any]] = {}
+# How many more times the continuous improvement coordinator is asked to fix an
+# answer that came back in the wrong shape, before the run gives up and hands
+# the last attempt over as-is. Five calls of the slow model is already a lot for
+# one node; whoever reads the answer is what turns exhaustion into an error (see
+# `AekoInventoryAnalyzer.analyze`).
+PLAN_FORMAT_MAX_RETRIES = 4
 
 
-def _get_agents(max_tokens: int | None = None) -> dict[str, Any]:
-    """
-    Return the agent registry for a given output token cap, building it once.
-
-    Args:
-        max_tokens: The output cap the agents should be built with, or None for
-            the configured default.
-
-    Returns:
-        dict[str, Any]: The agents, keyed by the names the graph routes by.
-    """
-
-    if _AGENTS:
-        return _AGENTS
-
-    if max_tokens not in _AGENT_CACHE:
-        _AGENT_CACHE[max_tokens] = create_agents(max_tokens=max_tokens)
-
-    return _AGENT_CACHE[max_tokens]
-
-
-def reset_agents() -> None:
-    """Drop every cached agent, so the next run rebuilds them from the runtime."""
-
-    _AGENT_CACHE.clear()
-
-
-RUNTIME.on_change(reset_agents)
-
-
-def _max_tokens_from(config: RunnableConfig | None) -> int | None:
+def _max_tokens_from(config: RunnableConfig | None) -> int:
     """
     Read the output token cap a run opted into.
 
@@ -59,39 +22,10 @@ def _max_tokens_from(config: RunnableConfig | None) -> int | None:
         config: The run's configuration, optionally carrying a "max_tokens".
 
     Returns:
-        int | None: The requested cap, or None to use the configured default.
+        int: The requested cap, or the configured conversational one.
     """
 
-    return (config or {}).get("configurable", {}).get("max_tokens")
-
-
-# How many prior messages of the conversation are replayed to an agent as
-# context. Enough to keep a follow-up question intelligible, bounded so a long
-# session doesn't crowd out the actual question.
-HISTORY_MESSAGE_LIMIT = 10
-
-
-def _format_history(messages: list) -> str:
-    """
-    Format prior conversation turns as a "Usuário:"/"Assistente:" transcript.
-
-    Args:
-        messages: The prior messages, oldest first.
-
-    Returns:
-        str: One labelled line per turn.
-    """
-
-    lines = []
-    for message in messages:
-        if isinstance(message, dict):
-            role, content = message.get("role", "user"), message.get("content", "")
-        else:
-            role, content = getattr(message, "type", "human"), getattr(message, "content", "")
-
-        lines.append(f"{'Usuário' if role in ('human', 'user') else 'Assistente'}: {content}")
-
-    return "\n".join(lines)
+    return (config or {}).get("configurable", {}).get("max_tokens") or RUNTIME.max_tokens
 
 
 def _format_findings(previous_agents: dict[str, str]) -> str:
@@ -114,12 +48,12 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
 
     Every agent's own prompt is designed (see its few-shot examples in
     aeko/engine/prompts/) around a single self-contained human turn, never
-    around replaying another agent's raw output as chat history. Feeding an
-    agent the accumulated `state["messages"]` would eventually end on another
-    agent's "ai" turn, which Gemini silently answers with empty content, and
-    also blurs each agent's persona with whatever it reads as "said by the
-    user". Building this message from `initial_question` plus a structured
-    summary of `previous_agents` avoids both problems.
+    around replaying another agent's raw output as chat history. Handing an
+    agent a running transcript would eventually end on another agent's "ai"
+    turn, which Gemini silently answers with empty content, and also blurs each
+    agent's persona with whatever it reads as "said by the user". Building this
+    message from `initial_question` plus a structured summary of
+    `previous_agents` avoids both problems.
 
     Also includes the Guardrail's most recent rejection feedback, if any, so
     that whoever is invoked next (typically the Roteador, deciding where to
@@ -130,7 +64,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
         state: The current graph state.
 
     Returns:
-        HumanMessage: The company context and prior conversation turns, the
+        HumanMessage: The company context and the prior conversation, the
             original question, a summary of any specialist findings gathered so
             far, and the latest guardrail feedback.
     """
@@ -141,11 +75,11 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     if company_context:
         parts.append(f"Contexto da empresa/usuário:\n{company_context}")
 
-    # The current question is already in `initial_question`; everything before
-    # it is the prior conversation.
-    history = (state.get("messages") or [])[:-1]
+    # Replayed whole: whoever owns the conversation is the one that decides how
+    # many turns are worth replaying, and renders them (see `SESSION_HISTORY_USAGE`).
+    history = state.get("history") or ""
     if history:
-        parts.append(f"Histórico da conversa:\n{_format_history(history[-HISTORY_MESSAGE_LIMIT:])}")
+        parts.append(f"Histórico da conversa:\n{history}")
 
     parts.append(state["initial_question"])
 
@@ -196,13 +130,43 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     return HumanMessage(content="\n\n".join(parts))
 
 
+def _build_format_retry_message(state: AetherGraphState, answer: str,
+                                problems: list[str]) -> HumanMessage:
+    """
+    Build the message that asks an agent to rewrite an ill-formed answer.
+
+    Carries the whole original request again, not just the complaint: the
+    agents are invoked with one isolated message and no history of their own
+    (see `_build_context_message`), so an agent told only "your format was
+    wrong" would have nothing left to rewrite the answer *from*.
+
+    Args:
+        state: The current graph state, holding the original request.
+        answer: The answer that was refused, verbatim.
+        problems: What is wrong with it, phrased for the agent to act on.
+
+    Returns:
+        HumanMessage: The correction request.
+    """
+
+    parts = [
+        _build_context_message(state).content,
+        "Sua resposta anterior foi recusada porque não seguiu o formato exigido:\n"
+        + "\n".join(f"- {problem}" for problem in problems),
+        f"Resposta anterior:\n{answer}",
+        "Reescreva o plano inteiro no formato exigido. Não comente esta correção.",
+    ]
+
+    return HumanMessage(content="\n\n".join(parts))
+
+
 def _invoke_agent(agent_name: str, message: HumanMessage,
                   max_tokens: int | None = None) -> tuple[str, NextAgent | None]:
     """
     Invoke a named agent with a single isolated message and parse its routing decision.
 
     Args:
-        agent_name: The key of the agent to invoke in `_AGENTS`.
+        agent_name: The name of the agent to invoke, as registered in `RUNTIME.agents`.
         message: The isolated handoff message built for this agent.
         max_tokens: The output token cap this run opted into.
 
@@ -214,7 +178,7 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
         ValueError: If the agent's output names a next agent that doesn't exist.
     """
 
-    agents = _get_agents(max_tokens)
+    agents = RUNTIME.agents_for(max_tokens)
 
     output = agents[agent_name].invoke({"messages": [message]})["output"]
 
@@ -238,8 +202,10 @@ def _specialist_node_factory(agent_name: str, *, terminal: bool = False) -> Call
     can build on its findings) and marks itself no longer pending in
     "pending_agents". It only writes to "messages" when `terminal` is True,
     i.e. when this agent's edge leads directly to END and its output is the
-    literal answer delivered to the user (e.g. the continuous improvement
-    coordinator).
+    literal answer delivered to the user. No analyst wired into the graph is
+    terminal today: the one that ends the report flow is the continuous
+    improvement coordinator, which needs a retry loop and so has a node of its
+    own (see `_coordenador_melhoria_node`).
 
     Args:
         agent_name: The key of the agent this node should invoke.
@@ -386,6 +352,60 @@ def _guardrail_node(state: AetherGraphState, config: RunnableConfig | None = Non
     return update
 
 
+def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
+    """
+    Invoke the continuous improvement coordinator, retrying an ill-formed answer.
+
+    Behaves exactly like a terminal specialist node, except that a run may hand
+    in a "validate_answer" callable — the inventory flow does, since its answer
+    is parsed into an `AekoImprovementPlan` rather than read as prose. Whatever
+    that callable complains about is sent straight back to the agent, up to
+    `PLAN_FORMAT_MAX_RETRIES` times, so a format slip costs one more call to
+    this node instead of the whole analysis.
+
+    Retrying here rather than around the graph is what keeps it affordable: the
+    inventory analyst and the pollutant/green gas analysts already ran, their
+    findings are in the state, and only the coordinator has to answer again.
+
+    The last attempt is recorded either way. Nothing is raised here — the graph
+    has no opinion on what the text is for; the caller that parses it is the one
+    that can tell an exhausted retry from a plan (see
+    `AekoInventoryAnalyzer.analyze`).
+
+    Args:
+        state: The current graph state.
+        config: The run's configuration, carrying the output token cap and,
+            optionally, the "validate_answer" callable. It takes the agent's raw
+            output and returns what is wrong with it, empty when nothing is.
+
+    Returns:
+        dict: The state update, recording the last attempt as the answer.
+    """
+
+    agent_name = "Coordenador de Melhoria Contínua"
+    configurable = (config or {}).get("configurable", {})
+    validate = configurable.get("validate_answer")
+    max_tokens = _max_tokens_from(config)
+
+    message = _build_context_message(state)
+
+    for _ in range(PLAN_FORMAT_MAX_RETRIES + 1):
+        output, next_agent = _invoke_agent(agent_name, message, max_tokens)
+
+        problems = list(validate(output)) if validate else []
+        if not problems:
+            break
+
+        message = _build_format_retry_message(state, output, problems)
+
+    return {
+        "previous_agents": {agent_name: output},
+        "pending_agents": [{"agent": agent_name, "is_still_pending": False}],
+        "next_agent": next_agent,
+        "messages": [{"role": "assistant", "content": output, "name": agent_name}],
+    }
+
+
 roteador_node = _roteador_node
 faq_node = _non_specialist_node_factory("FAQ", terminal=True)
 orquestrador_node = _orquestrador_node
@@ -394,4 +414,4 @@ guardrail_node = _guardrail_node
 analista_inventarios_node = _specialist_node_factory("Análista de inventários")
 analista_poluentes_node = _specialist_node_factory("Analista de Poluentes")
 analista_gases_verdes_node = _specialist_node_factory("Analista de Gases Verdes")
-coordenador_melhoria_node = _specialist_node_factory("Coordenador de Melhoria Contínua", terminal=True)
+coordenador_melhoria_node = _coordenador_melhoria_node
