@@ -352,11 +352,37 @@ It returns an `AekoImprovementPlan`, mirroring one document of the collection:
 | `updated_at` | When the plan was produced (UTC). |
 
 The continuous improvement coordinator is instructed — in its scope, its tasks and every
-one of its few-shot examples — to answer with exactly those three text fields as a JSON
-object, so what the model writes and what you persist are the same thing. An answer that
-doesn't match raises `MalformedAgentOutputError` rather than being padded with guesses:
-the SDK will not hand you a plan whose fields it invented. The model is also never given a
-say in `_id` or `updated_at` — only the three content fields are read back from it.
+one of its few-shot examples — to write exactly those three text fields under three fixed
+headings, and the SDK reads them straight back out:
+
+```text
+## Problema definido
+...
+
+## Método
+...
+
+## Raciocínio
+...
+```
+
+Headings rather than a JSON object, for the same reason the agents route on a literal
+`Next agent:` line: this flow runs with the report token cap, and a truncated JSON object
+is unparseable and costs the whole plan, while a truncated last section still yields the
+ones written before it. Only those three headings delimit a section, so a subtitle the
+agent writes mid-answer never cuts its own text short.
+
+An answer that misses a section is **sent back to the coordinator to be rewritten**, with
+the missing headings named and the original request attached, up to four times. The retry
+happens inside the graph and only re-asks the coordinator — the inventory, pollutant and
+green gas analysts already ran, and their findings stay in the state. If the format never
+comes, `analyze()` raises `MalformedAgentOutputError` rather than padding the plan with
+guesses: the SDK will not hand you a plan whose fields it invented. The model is also
+never given a say in `_id` or `updated_at` — only the three content fields are read back
+from it.
+
+Budget for it: a plan that takes every retry costs five coordinator calls at the report
+token cap, on top of the analysts. A well-formed answer costs exactly one.
 
 There is no `approved` field: this flow ends at the continuous improvement coordinator, a
 terminal node, and never reaches the output guardrail.
@@ -465,7 +491,9 @@ def inventory(body: InventoryRequest):
     if body.previous_report:
         analyzer.set_context(body.previous_report)
 
-    plan = analyzer.analyze(body.inventory_markdown, body.id_external_inventory)
+    plan = analyzer.analyze(
+        body.inventory_markdown, id_external_inventory=body.id_external_inventory
+    )
 
     # `exclude={"id"}`: the plan is new, so let MongoDB generate its `_id`.
     db.improvement_plan.insert_one(plan.model_dump(by_alias=True, exclude={"id"}))
@@ -493,7 +521,7 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | --- | --- | --- |
 | `AekoNotConfiguredError` | `Aeko.config()` was never called, or the key is empty/not a string. | `503` — a deployment problem, not a user one. |
 | `UnknownAgentError` | `set_tools()` got a key that is not an agent name. Carries `.agent` and `.known_agents`. | Fail at startup. |
-| `MalformedAgentOutputError` | An agent's answer did not match the shape its prompt demands — today, the improvement plan's JSON. | `502` — retry the analysis rather than persisting a guess. |
+| `MalformedAgentOutputError` | An agent's answer did not match the shape its prompt demands — today, the improvement plan's three headings — and did not recover after four rewrites. | `502` — retry the analysis rather than persisting a guess. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
 
 ```python
@@ -536,7 +564,7 @@ Everything below is importable directly from `aeko`.
 | Member | Signature |
 | --- | --- |
 | `set_context` | `set_context(context: str) -> None` |
-| `analyze` | `analyze(inventory: str, id_external_inventory: int) -> AekoImprovementPlan` |
+| `analyze` | `analyze(inventory: str, *, id_external_inventory: int) -> AekoImprovementPlan` |
 
 **Data objects.** Every DTO that crosses the API boundary is a Pydantic model mirroring one
 MongoDB collection, field for field:
@@ -662,7 +690,7 @@ Quatro pontos que definem a integração:
 4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
    tentativas (limite de 3), o run termina com `message.output == ""` e `approved is
    False` — verifique sempre antes de persistir. Já um plano de melhoria fora do formato
-   levanta `MalformedAgentOutputError`, em vez de devolver campos inventados.
+   levanta `MalformedAgentOutputError` — depois de o Coordenador ser convidado a reescrever a resposta até quatro vezes —, em vez de devolver campos inventados.
 
 Os nomes dos agentes (`Roteador`, `FAQ`, `Orquestrador`, `Guardrail de Saída`,
 `Análista de inventários`, `Analista de Poluentes`, `Analista de Gases Verdes`,

@@ -158,6 +158,99 @@ def test_invoke_agent_raises_for_unknown_agent_name(use_agents):
         pass
 
 
+# --- _coordenador_melhoria_node --------------------------------------------
+
+
+COORDINATOR = "Coordenador de Melhoria Contínua"
+
+
+class _ScriptedAgent:
+    """An agent that answers something different on each call."""
+
+    def __init__(self, *outputs: str):
+        self.outputs = list(outputs)
+        self.inputs = []
+
+    def invoke(self, input_):
+        self.inputs.append(input_)
+        return {"output": self.outputs[min(len(self.inputs) - 1, len(self.outputs) - 1)]}
+
+
+def _rejects(problems: list[str]):
+    """A "validate_answer" that complains until the answer says "ok"."""
+
+    return lambda answer: [] if "ok" in answer else problems
+
+
+def _config(**configurable):
+    return {"configurable": configurable}
+
+
+def test_the_coordinator_answers_once_when_nothing_validates_it(use_agents):
+    agent = _ScriptedAgent("Plano finalizado.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    result = nodes._coordenador_melhoria_node(_state_with())
+
+    assert len(agent.inputs) == 1
+    assert result["messages"] == [{
+        "role": "assistant",
+        "content": "Plano finalizado.\nNext agent: Nenhum",
+        "name": COORDINATOR,
+    }]
+    assert result["previous_agents"] == {COORDINATOR: "Plano finalizado.\nNext agent: Nenhum"}
+    assert result["pending_agents"] == [{"agent": COORDINATOR, "is_still_pending": False}]
+
+
+def test_an_ill_formed_answer_is_sent_back_to_the_coordinator(use_agents):
+    agent = _ScriptedAgent("Prosa solta.\nNext agent: Nenhum", "ok, corrigido.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    result = nodes._coordenador_melhoria_node(
+        _state_with(), _config(validate_answer=_rejects(["Falta a seção X."]))
+    )
+
+    assert len(agent.inputs) == 2, "o no deve pedir a correcao ao proprio coordenador"
+    assert result["messages"][0]["content"] == "ok, corrigido.\nNext agent: Nenhum"
+
+
+def test_the_correction_request_carries_the_problems_and_the_refused_answer(use_agents):
+    agent = _ScriptedAgent("Prosa solta.\nNext agent: Nenhum", "ok.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    nodes._coordenador_melhoria_node(
+        _state_with(), _config(validate_answer=_rejects(["Falta a seção Método."]))
+    )
+
+    retry = agent.inputs[1]["messages"][0].content
+    assert "Falta a seção Método." in retry
+    assert "Prosa solta." in retry, "o agente precisa ver o que escreveu"
+    assert "Pergunta de teste" in retry, "e o pedido original, para poder reescrever"
+
+
+def test_the_coordinator_gives_up_after_the_retry_cap(use_agents):
+    agent = _ScriptedAgent("Prosa solta.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    result = nodes._coordenador_melhoria_node(
+        _state_with(), _config(validate_answer=_rejects(["Falta tudo."]))
+    )
+
+    assert len(agent.inputs) == nodes.PLAN_FORMAT_MAX_RETRIES + 1
+    assert result["messages"][0]["content"] == "Prosa solta.\nNext agent: Nenhum", (
+        "a ultima tentativa e registrada; quem le o texto e que decide o erro"
+    )
+
+
+def test_a_run_without_a_validator_never_retries(use_agents):
+    agent = _ScriptedAgent("Prosa solta.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    nodes._coordenador_melhoria_node(_state_with(), _config(max_tokens=None))
+
+    assert len(agent.inputs) == 1, "o fluxo de chat tambem passa por aqui"
+
+
 # --- _specialist_node_factory ---------------------------------------------
 
 

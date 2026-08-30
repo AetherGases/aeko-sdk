@@ -6,6 +6,13 @@ from langchain_core.runnables import RunnableConfig
 from aeko.engine.graph.state import AetherGraphState, NextAgent
 from aeko.engine.runtime import RUNTIME
 
+# How many more times the continuous improvement coordinator is asked to fix an
+# answer that came back in the wrong shape, before the run gives up and hands
+# the last attempt over as-is. Five calls of the slow model is already a lot for
+# one node; whoever reads the answer is what turns exhaustion into an error (see
+# `AekoInventoryAnalyzer.analyze`).
+PLAN_FORMAT_MAX_RETRIES = 4
+
 
 def _max_tokens_from(config: RunnableConfig | None) -> int:
     """
@@ -143,6 +150,36 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     findings = {name: output for name, output in previous.items() if name != "Orquestrador"}
     if findings:
         parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
+
+    return HumanMessage(content="\n\n".join(parts))
+
+
+def _build_format_retry_message(state: AetherGraphState, answer: str,
+                                problems: list[str]) -> HumanMessage:
+    """
+    Build the message that asks an agent to rewrite an ill-formed answer.
+
+    Carries the whole original request again, not just the complaint: the
+    agents are invoked with one isolated message and no history of their own
+    (see `_build_context_message`), so an agent told only "your format was
+    wrong" would have nothing left to rewrite the answer *from*.
+
+    Args:
+        state: The current graph state, holding the original request.
+        answer: The answer that was refused, verbatim.
+        problems: What is wrong with it, phrased for the agent to act on.
+
+    Returns:
+        HumanMessage: The correction request.
+    """
+
+    parts = [
+        _build_context_message(state).content,
+        "Sua resposta anterior foi recusada porque não seguiu o formato exigido:\n"
+        + "\n".join(f"- {problem}" for problem in problems),
+        f"Resposta anterior:\n{answer}",
+        "Reescreva o plano inteiro no formato exigido. Não comente esta correção.",
+    ]
 
     return HumanMessage(content="\n\n".join(parts))
 
@@ -337,6 +374,60 @@ def _guardrail_node(state: AetherGraphState, config: RunnableConfig | None = Non
     return update
 
 
+def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
+    """
+    Invoke the continuous improvement coordinator, retrying an ill-formed answer.
+
+    Behaves exactly like a terminal specialist node, except that a run may hand
+    in a "validate_answer" callable — the inventory flow does, since its answer
+    is parsed into an `AekoImprovementPlan` rather than read as prose. Whatever
+    that callable complains about is sent straight back to the agent, up to
+    `PLAN_FORMAT_MAX_RETRIES` times, so a format slip costs one more call to
+    this node instead of the whole analysis.
+
+    Retrying here rather than around the graph is what keeps it affordable: the
+    inventory analyst and the pollutant/green gas analysts already ran, their
+    findings are in the state, and only the coordinator has to answer again.
+
+    The last attempt is recorded either way. Nothing is raised here — the graph
+    has no opinion on what the text is for; the caller that parses it is the one
+    that can tell an exhausted retry from a plan (see
+    `AekoInventoryAnalyzer.analyze`).
+
+    Args:
+        state: The current graph state.
+        config: The run's configuration, carrying the output token cap and,
+            optionally, the "validate_answer" callable. It takes the agent's raw
+            output and returns what is wrong with it, empty when nothing is.
+
+    Returns:
+        dict: The state update, recording the last attempt as the answer.
+    """
+
+    agent_name = "Coordenador de Melhoria Contínua"
+    configurable = (config or {}).get("configurable", {})
+    validate = configurable.get("validate_answer")
+    max_tokens = _max_tokens_from(config)
+
+    message = _build_context_message(state)
+
+    for _ in range(PLAN_FORMAT_MAX_RETRIES + 1):
+        output, next_agent = _invoke_agent(agent_name, message, max_tokens)
+
+        problems = list(validate(output)) if validate else []
+        if not problems:
+            break
+
+        message = _build_format_retry_message(state, output, problems)
+
+    return {
+        "previous_agents": {agent_name: output},
+        "pending_agents": [{"agent": agent_name, "is_still_pending": False}],
+        "next_agent": next_agent,
+        "messages": [{"role": "assistant", "content": output, "name": agent_name}],
+    }
+
+
 roteador_node = _roteador_node
 faq_node = _non_specialist_node_factory("FAQ", terminal=True)
 orquestrador_node = _orquestrador_node
@@ -345,4 +436,4 @@ guardrail_node = _guardrail_node
 analista_inventarios_node = _specialist_node_factory("Análista de inventários")
 analista_poluentes_node = _specialist_node_factory("Analista de Poluentes")
 analista_gases_verdes_node = _specialist_node_factory("Analista de Gases Verdes")
-coordenador_melhoria_node = _specialist_node_factory("Coordenador de Melhoria Contínua", terminal=True)
+coordenador_melhoria_node = _coordenador_melhoria_node

@@ -50,7 +50,10 @@ class FakeChatModel(BaseChatModel):
 
     Attributes:
         responses: Agent name to the exact output that agent should return,
-            including its "Next agent: ..." marker.
+            including its "Next agent: ..." marker. A list scripts one output
+            per call to that agent, the last one repeating once the list runs
+            out, which is what lets a test drive an agent that is asked to
+            answer more than once in a single run.
         default_response: Returned for any agent without a scripted response.
         failing_models: Model ids that should raise instead of answering, used
             to exercise the fallback wiring.
@@ -63,7 +66,7 @@ class FakeChatModel(BaseChatModel):
             with, so tests can assert on the rendered instructions.
     """
 
-    responses: dict[str, str] = {}
+    responses: dict[str, str | list[str]] = {}
     default_response: str = DEFAULT_FAKE_RESPONSE
     failing_models: tuple[str, ...] = ()
     model: str = "fake-model"
@@ -86,7 +89,13 @@ class FakeChatModel(BaseChatModel):
             next((m.content for m in messages if isinstance(m, SystemMessage)), "")
         )
 
-        content = self.responses.get(agent, self.default_response).replace("{agent}", agent)
+        scripted = self.responses.get(agent, self.default_response)
+
+        if isinstance(scripted, list):
+            answered = sum(1 for name, _ in self.calls if name == agent)
+            scripted = scripted[min(answered - 1, len(scripted) - 1)]
+
+        content = scripted.replace("{agent}", agent)
 
         # Both `usage_metadata` and a `model_name` are required for LangChain's
         # usage callback to record the call, which is what fills the token and

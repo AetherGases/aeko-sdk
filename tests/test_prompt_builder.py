@@ -3,7 +3,12 @@ import time
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from aeko.engine.prompts import builder
+from aeko.config._text import parse_sections
+from aeko.engine.prompts import (
+    CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
+    PLAN_SECTIONS,
+    builder,
+)
 from aeko.engine.prompts.builder import build_prompt
 
 
@@ -101,6 +106,27 @@ def test_build_prompt_tolerates_literal_braces_in_free_text_content():
     system_content = _system_content(prompt_template)
 
     assert "{valor}" in system_content
+
+
+def test_the_coordinator_is_told_to_answer_in_the_plan_sections():
+    system_content = _system_content(build_prompt(CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC))
+
+    for label in PLAN_SECTIONS.values():
+        assert f"## {label}" in system_content
+
+
+def test_every_coordinator_shot_is_readable_by_the_plan_parser():
+    """
+    The shots are what actually decide the answer's shape, so the parser has to
+    agree with all six of them — an instruction the examples contradict is an
+    instruction the model ignores.
+    """
+
+    for shot in CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC.shots:
+        sections = parse_sections(shot["resposta"], PLAN_SECTIONS)
+
+        assert set(sections) == set(PLAN_SECTIONS)
+        assert all(sections.values())
 
 
 def test_build_prompt_recomputes_temporal_context_on_each_render():
