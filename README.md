@@ -124,16 +124,25 @@ Distribution and import name are the same: `aeko`. (The GitHub repository is `ae
 ## Quickstart
 
 ```python
-from aeko import Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser
+from aeko import (
+    Aeko,
+    AekoInventoryAnalyzer,
+    AekoMessenger,
+    AekoSession,
+    AekoUser,
+    AekoUserMemory,
+)
 
 # 1. Configure the SDK once, for the whole process.
 Aeko.config("YOUR_GEMINI_API_KEY")
 
-# 2. Chat. Both documents come straight out of your database, on every request.
+# 2. Chat. The documents come straight out of your database, on every request.
 user = AekoUser.model_validate(db.users.find_one({"_id": user_id}))
 session = AekoSession.model_validate(db.sessions.find_one({"_id": session_id}))
+memories = [AekoUserMemory.model_validate(document)
+            for document in db.user_memory.find({"id_user": user_id})]
 
-messenger = AekoMessenger(user)
+messenger = AekoMessenger(user, memories)
 reply = messenger.send_message(
     "What is the difference between scope 1 and scope 2?", session
 )
@@ -238,12 +247,13 @@ from aeko import AGENT_NAMES  # ('Roteador', 'FAQ', 'Orquestrador', ...)
 ### 3. The conversational flow
 
 ```python
-from aeko import AekoMessage, AekoMessenger, AekoSession, AekoUser
+from aeko import AekoMessage, AekoMessenger, AekoSession, AekoUser, AekoUserMemory
 
 # Built once per user — it holds nothing about any conversation.
 messenger = AekoMessenger(
     AekoUser(id_external_user=1001, role="ESG analyst",
              usecase="Tracks the boiler fleet's gas substitution."),
+    [AekoUserMemory(field="preferred_language", description="Answers in Portuguese")],
 )
 
 # Rehydrated per request, from what you persisted.
@@ -309,17 +319,23 @@ over. **Only a final result is recorded**: a turn the guardrail rejected is *not
 appended, because a draft that never reached the user cannot become context for the next
 question.
 
-**User memories.** The SDK never receives `user_memory` documents: reading and expiring
-them is your API's job. Register a lookup tool instead, and the agents' instructions
-already tell them to consult it:
+**User memories.** Hand the `user_memory` documents to the constructor and **every one of
+them** is rendered into the same business context the user's role and usecase go into, so
+every agent of the run reads them:
 
 ```python
-AekoMessenger.set_tools({"FAQ": [AekoTool(tool=buscar_memorias,
-                                          description="Consulta as memórias do usuário.")]})
+messenger = AekoMessenger(user, memories)   # list[AekoUserMemory]
 ```
 
-`AekoUserMemory.to_prompt_line()` renders a memory the way those instructions expect
-(`"<field>: <description>"`), with `expires_at` and the identifiers left out.
+Each memory becomes one `"- <field>: <description>"` line (`AekoUserMemory.to_prompt_line()`)
+under a `Memórias do usuário:` heading, with `expires_at` and the identifiers left out — a
+model can act on what was remembered, not on when the row stops being valid. There is no
+cap here, unlike the conversation: a memory is already the condensed form of something the
+user told you once, and dropping any of them would silently un-remember it.
+
+**Deciding which memories are still valid is your API's job**: filter `expires_at` before
+handing the list over. A user with no memories is normal — the argument is optional, and
+no empty section reaches the prompt.
 
 ### 4. The inventory flow
 
@@ -407,10 +423,11 @@ from aeko import (
     AekoSession,
     AekoTool,
     AekoUser,
+    AekoUserMemory,
 )
 
 from .settings import settings
-from .tools import buscar_memorias, buscar_norma, consulta_precos
+from .tools import buscar_norma, consulta_precos
 
 
 @asynccontextmanager
@@ -418,11 +435,7 @@ async def lifespan(app: FastAPI):
     # Process-wide setup: exactly once, before the first request.
     Aeko.config(settings.GEMINI_API_KEY, report_max_tokens=12288)
     AekoMessenger.set_tools({
-        "FAQ": [
-            buscar_norma,
-            AekoTool(tool=buscar_memorias,
-                     description="Consulta as memórias do usuário (user_memory)."),
-        ],
+        "FAQ": [buscar_norma],
         "Coordenador de Melhoria Contínua": [
             AekoTool(tool=consulta_precos, description="Price the equipment you recommend."),
         ],
@@ -445,7 +458,13 @@ def chat(body: ChatRequest):
     session = AekoSession.model_validate(db.session.find_one({"_id": body.session_id}))
     user = AekoUser.model_validate(db.user.find_one({"_id": session.id_user}))
 
-    messenger = AekoMessenger(user)
+    #    Expiring the memories is yours to do: the SDK renders every one it gets.
+    memories = [
+        AekoUserMemory.model_validate(document)
+        for document in db.user_memory.find({"id_user": user.id, "expires_at": None})
+    ]
+
+    messenger = AekoMessenger(user, memories)
 
     # 2. Run it. Blocking call: keep it off the event loop in production
     #    (`run_in_threadpool`, a task queue, or a sync worker).
@@ -556,7 +575,7 @@ Everything below is importable directly from `aeko`.
 | Member | Signature |
 | --- | --- |
 | `set_tools` *(classmethod)* | `set_tools(tools: dict[str, list[AekoTool \| Any]]) -> None` |
-| *constructor* | `AekoMessenger(user: AekoUser)` |
+| *constructor* | `AekoMessenger(user: AekoUser, memories: Sequence[AekoUserMemory] \| None = None)` |
 | `send_message` | `send_message(message: str, session: AekoSession) -> AekoMessageResponse` |
 
 **`AekoInventoryAnalyzer`** — report entry point.
@@ -596,7 +615,7 @@ never invents one for a document it merely received:
 | `AekoImprovementPlan.updated_at` | SDK | The plan is produced here. |
 | `AekoSession.updated_at` | SDK | The SDK is what updates the session, by appending the turn. |
 | `AekoSession.created_at` | **You** | The session already exists by the time it reaches `send_message()`. |
-| `AekoUserMemory.created_at` | **You** | The SDK never receives memories in the first place. |
+| `AekoUserMemory.created_at` | **You** | The memory was recorded by your API; the SDK only reads it into the prompt. |
 
 So `AekoSession`, `AekoUser` and `AekoUserMemory` default their timestamps to `None` rather than to
 "now": a session read from the database brings its own `created_at` through untouched, and
@@ -653,14 +672,17 @@ pip install aeko
 ```
 
 ```python
-from aeko import Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser
+from aeko import (Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser,
+                  AekoUserMemory)
 
 Aeko.config("SUA_CHAVE_GEMINI")          # obrigatório: o SDK não lê variáveis de ambiente
 
 usuario = AekoUser.model_validate(db.user.find_one({"_id": id_usuario}))
 sessao = AekoSession.model_validate(db.session.find_one({"_id": id_sessao}))
+memorias = [AekoUserMemory.model_validate(documento)
+            for documento in db.user_memory.find({"id_user": id_usuario})]
 
-messenger = AekoMessenger(usuario)
+messenger = AekoMessenger(usuario, memorias)
 resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?", sessao)
 print(resposta.message.output)
 db.session.update_one({"_id": id_sessao},
@@ -684,9 +706,10 @@ Quatro pontos que definem a integração:
 3. **O SDK não guarda sessão.** Passe o documento `AekoSession` em todo `send_message()`:
    a conversa é o próprio `session.messages`, o SDK o atualiza in-place e qualquer worker
    atende qualquer sessão. Só os **10 turnos mais recentes** são reenviados aos agentes —
-   mande a sessão inteira, o corte é do que o modelo lê, nunca do que você persiste. As
-   memórias do usuário chegam por uma tool registrada em `set_tools()`, nunca por
-   parâmetro.
+   mande a sessão inteira, o corte é do que o modelo lê, nunca do que você persiste. Já as
+   memórias do usuário vão no construtor (`AekoMessenger(user, memories)`) e são
+   renderizadas **todas**, sem corte, no contexto que todo agente lê — filtrar as
+   expiradas é com a API.
 4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
    tentativas (limite de 3), o run termina com `message.output == ""` e `approved is
    False` — verifique sempre antes de persistir. Já um plano de melhoria fora do formato

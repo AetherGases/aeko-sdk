@@ -134,10 +134,10 @@ class AekoUserMemory(BaseModel):
     """
     One remembered fact about a user, mirroring the "user_memory" collection.
 
-    Memories are not passed into the SDK: agents look them up through the memory
-    tool the API registers with `AekoMessenger.set_tools()`. This model is what
-    that tool should return, so a memory reaches the prompt in the one shape the
-    agents' instructions describe.
+    The API reads the collection and hands the memories to `AekoMessenger`,
+    which renders every one of them into the business context each agent of the
+    run reads. This model is that hand-off, so a memory reaches the prompt in
+    the one shape the agents' instructions describe.
 
     Attributes:
         id: The document's `_id`. Owned by the database.
