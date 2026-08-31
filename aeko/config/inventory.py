@@ -1,6 +1,7 @@
 from aeko.config._text import parse_sections, strip_routing_marker
 from aeko.config.dto import AekoImprovementPlan
 from aeko.config.exceptions import MalformedAgentOutputError
+from aeko.engine._content import text_of
 from aeko.engine.graph.builder import get_app
 from aeko.engine.graph.nodes import PLAN_FORMAT_MAX_RETRIES
 from aeko.engine.graph.state import create_initial_state
@@ -198,8 +199,8 @@ class AekoInventoryAnalyzer:
 
         messages = result.get("messages") or []
         final = messages[-1] if messages else None
-        answer = "" if final is None else strip_routing_marker(
+        answer = "" if final is None else strip_routing_marker(text_of(
             final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
-        )
+        ))
 
         return _to_improvement_plan(answer, id_external_inventory)
