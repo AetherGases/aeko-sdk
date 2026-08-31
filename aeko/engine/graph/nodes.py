@@ -3,6 +3,7 @@ from typing import Callable
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
+from aeko.engine._content import text_of
 from aeko.engine.graph.state import AetherGraphState, NextAgent
 from aeko.engine.runtime import RUNTIME
 
@@ -180,7 +181,11 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
 
     agents = RUNTIME.agents_for(max_tokens)
 
-    output = agents[agent_name].invoke({"messages": [message]})["output"]
+    # Normalized here and nowhere else in the graph: this is the single point
+    # every agent's output enters the run through, so everything downstream —
+    # "previous_agents", the "messages" channel, the routing marker below —
+    # goes on being the plain text it was written against.
+    output = text_of(agents[agent_name].invoke({"messages": [message]})["output"])
 
     raw_next = output.split("Next agent: ")[-1].strip() if "Next agent: " in output else ""
 

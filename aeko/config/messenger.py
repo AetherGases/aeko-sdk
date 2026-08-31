@@ -3,6 +3,7 @@ from typing import Any, Sequence
 from langchain_core.callbacks import get_usage_metadata_callback
 
 from aeko.config._text import strip_routing_marker
+from aeko.engine._content import text_of
 from aeko.config.dto import (
     AekoMessage,
     AekoMessageResponse,
@@ -42,7 +43,7 @@ def _final_answer(result: dict) -> str:
     final = messages[-1]
     content = final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
 
-    return strip_routing_marker(content)
+    return strip_routing_marker(text_of(content))
 
 
 def _agents_called(result: dict) -> list[str]:
