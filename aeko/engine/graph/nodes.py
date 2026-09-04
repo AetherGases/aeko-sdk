@@ -1,3 +1,4 @@
+from time import perf_counter
 from typing import Callable
 
 from langchain_core.messages import HumanMessage
@@ -6,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from aeko.engine._content import text_of
 from aeko.engine.graph.state import AetherGraphState, NextAgent
 from aeko.engine.runtime import RUNTIME
+from aeko.shared import record_agent_call
 
 # How many more times the continuous improvement coordinator is asked to fix an
 # answer that came back in the wrong shape, before the run gives up and hands
@@ -181,11 +183,23 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
 
     agents = RUNTIME.agents_for(max_tokens)
 
-    # Normalized here and nowhere else in the graph: this is the single point
-    # every agent's output enters the run through, so everything downstream —
-    # "previous_agents", the "messages" channel, the routing marker below —
-    # goes on being the plain text it was written against.
-    output = text_of(agents[agent_name].invoke({"messages": [message]})["output"])
+    # Recorded here for the same reason the normalization below lives here:
+    # this is the one point every agent of every flow is invoked through, so an
+    # agent added to the graph later is reported without anyone remembering to.
+    # Nothing is written — the request the call belongs to lists it when it
+    # ends, and a node knows nothing about which request that is. In a `finally`
+    # so an agent that raises is still listed, which is what says where a failed
+    # request got to.
+    started = perf_counter()
+
+    try:
+        # Normalized here and nowhere else in the graph: this is the single
+        # point every agent's output enters the run through, so everything
+        # downstream — "previous_agents", the "messages" channel, the routing
+        # marker below — goes on being the plain text it was written against.
+        output = text_of(agents[agent_name].invoke({"messages": [message]})["output"])
+    finally:
+        record_agent_call(agent_name, perf_counter() - started)
 
     raw_next = output.split("Next agent: ")[-1].strip() if "Next agent: " in output else ""
 

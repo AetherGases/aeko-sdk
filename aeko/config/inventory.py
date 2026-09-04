@@ -7,8 +7,12 @@ from aeko.engine.graph.nodes import PLAN_FORMAT_MAX_RETRIES
 from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import PLAN_SECTIONS
 from aeko.engine.runtime import RUNTIME
+from aeko.shared import Flow, processing
 
 INVENTORY_ENTRY_POINT = "Análista de inventários"
+
+# The module bracket every line written from here carries.
+LOG_MODULE = "inventory"
 
 # The fields the continuous improvement coordinator is instructed to answer
 # with, and the only ones read back from it. They come from the same mapping
@@ -182,25 +186,34 @@ class AekoInventoryAnalyzer:
 
         state = create_initial_state(inventory, company_context=self._context)
 
-        result = get_app().invoke(
-            state,
-            config={
-                "configurable": {
-                    "entry_point": INVENTORY_ENTRY_POINT,
-                    "max_tokens": RUNTIME.report_max_tokens,
-                    # What this flow needs the coordinator's answer to look
-                    # like. The graph itself has no opinion on that, so the
-                    # node asks for a rewrite through this and nothing else
-                    # in the engine has to know what a plan is.
-                    "validate_answer": _format_problems_in,
-                }
-            },
-        )
+        # Wraps the parsing as well as the run: an answer that never took the
+        # requested shape is a request that failed, and is logged in red as one
+        # by the exception `_to_improvement_plan` raises.
+        with processing(Flow.REPORT, LOG_MODULE) as run:
+            run.item("inventory", id_external_inventory)
+            run.item("input", f"{len(inventory)} characters")
 
-        messages = result.get("messages") or []
-        final = messages[-1] if messages else None
-        answer = "" if final is None else strip_routing_marker(text_of(
-            final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
-        ))
+            result = get_app().invoke(
+                state,
+                config={
+                    "configurable": {
+                        "entry_point": INVENTORY_ENTRY_POINT,
+                        "max_tokens": RUNTIME.report_max_tokens,
+                        # What this flow needs the coordinator's answer to look
+                        # like. The graph itself has no opinion on that, so the
+                        # node asks for a rewrite through this and nothing else
+                        # in the engine has to know what a plan is.
+                        "validate_answer": _format_problems_in,
+                    }
+                },
+            )
 
-        return _to_improvement_plan(answer, id_external_inventory)
+            messages = result.get("messages") or []
+            final = messages[-1] if messages else None
+            answer = "" if final is None else strip_routing_marker(text_of(
+                final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
+            ))
+
+            plan = _to_improvement_plan(answer, id_external_inventory)
+
+        return plan
