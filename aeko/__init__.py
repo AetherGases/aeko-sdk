@@ -6,6 +6,7 @@ from aeko.config import (
     AGENT_NAMES,
     Aeko,
     AekoAnalysisResponse,
+    AekoAnalysisResponse,
     AekoError,
     AekoImprovementPlan,
     AekoInventoryAnalyzer,
@@ -21,11 +22,14 @@ from aeko.config import (
     UnknownAgentError,
 )
 from aeko.shared import AekoAgentMetrics, AekoMetrics
+from aeko.shared import AekoAgentMetrics, AekoMetrics
 
 __all__ = [
     "__version__",
     "AGENT_NAMES",
     "Aeko",
+    "AekoAgentMetrics",
+    "AekoAnalysisResponse",
     "AekoAgentMetrics",
     "AekoAnalysisResponse",
     "AekoError",
@@ -34,6 +38,7 @@ __all__ = [
     "AekoMessage",
     "AekoMessageResponse",
     "AekoMessenger",
+    "AekoMetrics",
     "AekoMetrics",
     "AekoNotConfiguredError",
     "AekoSession",

@@ -254,9 +254,25 @@ def make_metrics() -> AekoMetrics:
     return AekoMetrics(id_request="req-1", flow="conversational")
 
 
+def make_metrics() -> AekoMetrics:
+    """
+    The event tracking every response carries, as `send_message()` fills it.
+
+    These tests are about the envelope, not about what it measured, so the
+    cheapest valid one will do — what matters here is that a response cannot be
+    built without one.
+
+    Returns:
+        AekoMetrics: An event tracking for a request that went fine.
+    """
+
+    return AekoMetrics(id_request="req-1", flow="conversational")
+
+
 def test_the_response_carries_a_persistable_message_plus_run_metadata():
     response = AekoMessageResponse(
         message=AekoMessage.model_validate(MESSAGE_DOC),
+        aeko_metrics=make_metrics(),
         aeko_metrics=make_metrics(),
         agents_called=["Roteador", "FAQ"],
         approved=True,
@@ -272,6 +288,7 @@ def test_the_response_carries_the_identifiers_it_belongs_to():
     response = AekoMessageResponse(
         message=AekoMessage(input="oi"),
         aeko_metrics=make_metrics(),
+        aeko_metrics=make_metrics(),
         id_session=SESSION_DOC["_id"],
         id_user=USER_DOC["_id"],
     )
@@ -286,6 +303,10 @@ def test_the_identifiers_stay_out_of_the_persisted_message():
         aeko_metrics=make_metrics(),
         id_session="s1",
         id_user="u1",
+        message=AekoMessage(input="oi"),
+        aeko_metrics=make_metrics(),
+        id_session="s1",
+        id_user="u1",
     )
 
     assert set(response.message.model_dump()) == set(MESSAGE_DOC), (
@@ -295,6 +316,10 @@ def test_the_identifiers_stay_out_of_the_persisted_message():
 
 def test_the_run_metadata_stays_out_of_the_persisted_message():
     response = AekoMessageResponse(
+        message=AekoMessage(input="oi"),
+        aeko_metrics=make_metrics(),
+        agents_called=["FAQ"],
+        approved=True,
         message=AekoMessage(input="oi"),
         aeko_metrics=make_metrics(),
         agents_called=["FAQ"],
