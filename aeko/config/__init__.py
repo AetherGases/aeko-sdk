@@ -1,5 +1,6 @@
 from aeko.config.aeko import Aeko
 from aeko.config.dto import (
+    AekoAnalysisResponse,
     AekoImprovementPlan,
     AekoMessage,
     AekoMessageResponse,
@@ -21,6 +22,7 @@ from aeko.engine.prompts import AGENT_NAMES
 __all__ = [
     "AGENT_NAMES",
     "Aeko",
+    "AekoAnalysisResponse",
     "AekoError",
     "AekoImprovementPlan",
     "AekoInventoryAnalyzer",

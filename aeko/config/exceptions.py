@@ -1,5 +1,20 @@
+from aeko.shared import AekoMetrics
+
+
 class AekoError(Exception):
-    """Base class for every error raised by the Aeko SDK."""
+    """
+    Base class for every error raised by the Aeko SDK.
+
+    Attributes:
+        aeko_metrics: What the failed request cost and went through, attached
+            on the way out of `processing()` (see aeko/shared/logger.py). A
+            request that raised has no return value left to carry it, and a
+            failed request is the one the API most needs to have persisted.
+            None for an error raised outside any request — a refused
+            configuration, or tools registered for an agent that doesn't exist.
+    """
+
+    aeko_metrics: AekoMetrics | None = None
 
 
 class AekoNotConfiguredError(AekoError):

@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aeko.shared import AekoMetrics
+
 # Fields that exist only so the API can persist and correlate documents. They
 # are deliberately left out of every prompt rendering below: a model that reads
 # them gains nothing and may start echoing internal identifiers back at the
@@ -247,9 +249,13 @@ class AekoMessageResponse(BaseModel):
         agents_called: Names of the agents that contributed, in call order.
         approved: Whether the output guardrail approved the answer.
         guardrail_retries: How many times the guardrail sent the draft back.
+        aeko_metrics: What this request cost and went through, for the API to
+            persist on its own. Kept out of `message` for the same reason the
+            identifiers are: the collection's entries do not carry it.
     """
 
     message: AekoMessage
+    aeko_metrics: AekoMetrics
     id_session: str | None = None
     id_user: str | None = None
     agents_called: list[str] = Field(default_factory=list)
@@ -284,3 +290,27 @@ class AekoImprovementPlan(BaseModel):
     method: str
     reasoning: str
     updated_at: datetime = Field(default_factory=_now)
+
+
+class AekoAnalysisResponse(BaseModel):
+    """
+    The answer returned by `AekoInventoryAnalyzer.analyze()`.
+
+    `plan` is the only part that belongs in the "improvement_plan" collection:
+    it is exactly one document of it, ready to be written. The event tracking
+    beside it says how the analysis reached that plan, and the API persists it
+    somewhere else — which is why it is an envelope around the plan rather than
+    another field of it. A document carrying its own latency would be a
+    document the collection never described.
+
+    This mirrors what `AekoMessageResponse` already does for a chat turn, so
+    both public flows hand back the same two things: what to store, and what it
+    cost to produce.
+
+    Attributes:
+        plan: The improvement plan, mirroring "improvement_plan".
+        aeko_metrics: What this request cost and went through.
+    """
+
+    plan: AekoImprovementPlan
+    aeko_metrics: AekoMetrics

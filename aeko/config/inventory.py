@@ -1,5 +1,5 @@
 from aeko.config._text import parse_sections, strip_routing_marker
-from aeko.config.dto import AekoImprovementPlan
+from aeko.config.dto import AekoAnalysisResponse, AekoImprovementPlan
 from aeko.config.exceptions import MalformedAgentOutputError
 from aeko.engine._content import text_of
 from aeko.engine.graph.builder import get_app
@@ -7,8 +7,12 @@ from aeko.engine.graph.nodes import PLAN_FORMAT_MAX_RETRIES
 from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import PLAN_SECTIONS
 from aeko.engine.runtime import RUNTIME
+from aeko.shared import Flow, processing
 
 INVENTORY_ENTRY_POINT = "Análista de inventários"
+
+# The module bracket every line written from here carries.
+LOG_MODULE = "inventory"
 
 # The fields the continuous improvement coordinator is instructed to answer
 # with, and the only ones read back from it. They come from the same mapping
@@ -150,7 +154,8 @@ class AekoInventoryAnalyzer:
 
         self._context = context or ""
 
-    def analyze(self, inventory: str, *, id_external_inventory: int) -> AekoImprovementPlan:
+    def analyze(self, inventory: str, *, id_external_inventory: int,
+                id_request: str) -> AekoAnalysisResponse:
         """
         Analyze a GHG inventory and return the improvement plan.
 
@@ -169,38 +174,56 @@ class AekoInventoryAnalyzer:
                 reads the database, so this cannot be derived here. Keyword-only:
                 two arguments that are both "the inventory" are worth naming at
                 every call site.
+            id_request: What the API correlates this request by, echoed back in
+                the returned event tracking. Required for the same reason
+                `id_external_inventory` is: the SDK reads no database and has
+                no way to derive one.
 
         Returns:
-            AekoImprovementPlan: The plan, mirroring one document of the
-                "improvement_plan" collection.
+            AekoAnalysisResponse: The plan to persist, mirroring one document of
+                the "improvement_plan" collection, and what producing it cost.
 
         Raises:
             AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
             MalformedAgentOutputError: If the coordinator's answer still doesn't
-                match the shape its prompt demands after every retry.
+                match the shape its prompt demands after every retry. Its
+                `aeko_metrics` carries what the failed analysis went through,
+                since there is no response left to carry it back.
         """
 
         state = create_initial_state(inventory, company_context=self._context)
 
-        result = get_app().invoke(
-            state,
-            config={
-                "configurable": {
-                    "entry_point": INVENTORY_ENTRY_POINT,
-                    "max_tokens": RUNTIME.report_max_tokens,
-                    # What this flow needs the coordinator's answer to look
-                    # like. The graph itself has no opinion on that, so the
-                    # node asks for a rewrite through this and nothing else
-                    # in the engine has to know what a plan is.
-                    "validate_answer": _format_problems_in,
-                }
-            },
-        )
+        # Wraps the parsing as well as the run: an answer that never took the
+        # requested shape is a request that failed, and is logged in red as one
+        # by the exception `_to_improvement_plan` raises.
+        with processing(Flow.REPORT, LOG_MODULE, id_request) as run:
+            run.item("inventory", id_external_inventory)
+            run.item("input", f"{len(inventory)} characters")
 
-        messages = result.get("messages") or []
-        final = messages[-1] if messages else None
-        answer = "" if final is None else strip_routing_marker(text_of(
-            final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
-        ))
+            result = get_app().invoke(
+                state,
+                config={
+                    "configurable": {
+                        "entry_point": INVENTORY_ENTRY_POINT,
+                        "max_tokens": RUNTIME.report_max_tokens,
+                        # What this flow needs the coordinator's answer to look
+                        # like. The graph itself has no opinion on that, so the
+                        # node asks for a rewrite through this and nothing else
+                        # in the engine has to know what a plan is.
+                        "validate_answer": _format_problems_in,
+                    }
+                },
+            )
 
-        return _to_improvement_plan(answer, id_external_inventory)
+            messages = result.get("messages") or []
+            final = messages[-1] if messages else None
+            answer = "" if final is None else strip_routing_marker(text_of(
+                final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
+            ))
+
+            plan = _to_improvement_plan(answer, id_external_inventory)
+
+        # Assembled once the run has closed, so the latency it reports is the
+        # analysis's own. A run that never got here raised instead, carrying the
+        # same event tracking out on the exception (see `processing`).
+        return AekoAnalysisResponse(plan=plan, aeko_metrics=run.event_tracking())

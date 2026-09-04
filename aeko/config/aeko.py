@@ -1,5 +1,13 @@
 from aeko.config.exceptions import AekoNotConfiguredError
 from aeko.engine.runtime import RUNTIME
+from aeko.shared import log_failure, log_success
+
+# The module bracket every line written from here carries.
+LOG_MODULE = "config"
+
+# Configuring the SDK is not a request, so these lines are deliberately not
+# built like one: no detail list, no duration, no agents — just the setting
+# that changed, on a line of its own, whenever it changes.
 
 
 class Aeko:
@@ -30,6 +38,10 @@ class Aeko:
         """
 
         if not api_key or not isinstance(api_key, str):
+            log_failure(
+                LOG_MODULE,
+                "SDK configuration refused: missing or invalid API key.",
+            )
             raise AekoNotConfiguredError("Aeko.config() requires a non-empty API key.")
 
         RUNTIME.configure(
@@ -38,6 +50,19 @@ class Aeko:
             slow_model=slow_model,
             max_tokens=max_tokens,
             report_max_tokens=report_max_tokens,
+        )
+
+        # The settings are read back off the runtime rather than off the
+        # arguments so the line reports what is actually in effect, defaults
+        # included, instead of only the overrides this call happened to pass.
+        # The API key is never among them: it is a credential, and a log is
+        # the last place one should end up.
+        log_success(
+            LOG_MODULE,
+            "SDK configured"
+            f" (fast_model={RUNTIME.fast_model}, slow_model={RUNTIME.slow_model},"
+            f" max_tokens={RUNTIME.max_tokens},"
+            f" report_max_tokens={RUNTIME.report_max_tokens})",
         )
 
     @staticmethod
@@ -56,3 +81,5 @@ class Aeko:
         """Clear every setting, including registered tools, back to defaults."""
 
         RUNTIME.reset()
+
+        log_success(LOG_MODULE, "SDK reset to its defaults.")
