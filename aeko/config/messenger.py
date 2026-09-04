@@ -1,7 +1,5 @@
 from typing import Any, Sequence
 
-from langchain_core.callbacks import get_usage_metadata_callback
-
 from aeko.config._text import strip_routing_marker
 from aeko.engine._content import text_of
 from aeko.config.dto import (
@@ -152,31 +150,6 @@ def _memories_context(memories: Sequence[AekoUserMemory]) -> str:
     return f"{MEMORIES_LABEL}\n{lines}"
 
 
-def _usage_of(usage_metadata: dict[str, dict]) -> tuple[str, int, int]:
-    """
-    Summarize what a run consumed, as the "session.messages" fields record it.
-
-    A single turn can cross both configured models — the router and the FAQ run
-    on the fast one, an analyst on the slow one — while the collection keeps a
-    single `llm` field, so every model that served the turn is named there.
-
-    Args:
-        usage_metadata: Model name to its token usage, as collected by
-            LangChain's usage callback. Empty when the provider reports no
-            usage at all.
-
-    Returns:
-        tuple[str, int, int]: The models used, the prompt tokens and the
-            completion tokens, all zeroed/empty when nothing was reported.
-    """
-
-    llm = ", ".join(usage_metadata)
-    input_tokens = sum(usage.get("input_tokens", 0) for usage in usage_metadata.values())
-    output_tokens = sum(usage.get("output_tokens", 0) for usage in usage_metadata.values())
-
-    return llm, input_tokens, output_tokens
-
-
 class AekoMessenger:
     """
     Conversational entry point: routes a user message through the agent graph.
@@ -325,21 +298,16 @@ class AekoMessenger:
                 f"{len(message)} characters, {len(session.messages)} history turns",
             )
 
-            with get_usage_metadata_callback() as usage:
-                result = get_app().invoke(
-                    state, config={"configurable": {"entry_point": "Roteador"}}
-                )
+            result = get_app().invoke(
+                state, config={"configurable": {"entry_point": "Roteador"}}
+            )
 
             answer = _final_answer(result)
-            llm, input_tokens, output_tokens = _usage_of(usage.usage_metadata)
 
-            turn = AekoMessage(
-                input=message,
-                output=answer,
-                llm=llm,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
+            # What the turn cost is not recorded on the turn: it is reported
+            # per agent invocation on this request's event tracking, which the
+            # graph collects on its own (see `agent_call`).
+            turn = AekoMessage(input=message, output=answer)
 
             if answer:
                 session.messages.append(turn)

@@ -17,19 +17,20 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
-## What's new in 3.0
+## What's new in 3.1
 
-Version 3 makes the SDK **report what a request cost**. Both entry points now take an
+Version 3.1 makes the SDK **report what a request cost**. Both entry points now take an
 `id_request` and hand back an `AekoMetrics` alongside the answer, so the API can persist
 per-request telemetry it previously had no way to obtain. Two changes are breaking.
 
-| Area | 2.x | 3.0 |
+| Area | 2.x | 3.1 |
 | --- | --- | --- |
 | `send_message()` | `send_message(message, session)` | `send_message(message, session, *, id_request)` — **required, keyword-only** |
 | `analyze()` | `analyze(inventory, *, id_external_inventory) -> AekoImprovementPlan` | `analyze(inventory, *, id_external_inventory, id_request) -> AekoAnalysisResponse` |
 | Telemetry | Logs only, readable by a person | `AekoMetrics` on every response, persistable by a machine |
 | Per-agent cost | Nothing — one total per run | Tokens, model and tools called, per agent invocation |
 | Failed requests | The exception, and nothing else | The exception, carrying the run's `aeko_metrics` |
+| `AekoMessage` | `input`, `output`, `submitted_at`, `llm`, `input_tokens`, `output_tokens` | `input`, `output`, `submitted_at` — the cost moved to `aeko_metrics` |
 
 The logs are unchanged: this adds a second rendering of what a run already observed, it
 does not replace the stream you read in a terminal. See
@@ -376,13 +377,16 @@ the right conversation. The turn itself mirrors the collection exactly:
 | `input` | What the user sent. |
 | `output` | The final user-facing text, already stripped of the agents' internal routing markers. **Empty when the guardrail never approved a draft.** |
 | `submitted_at` | When the turn was answered (UTC). |
-| `llm` | The model(s) that served the turn, as reported by the provider — comma-separated when a turn crossed more than one, which it does whenever a specialist analyst was called. |
-| `input_tokens` / `output_tokens` | What the whole run consumed, summed across every agent it called. |
 
-A single turn crosses both configured models — the router, FAQ, orchestrator and guardrail
-run on the fast one, the analysts on the slow one — so `input_tokens` and `output_tokens`
-are the **whole run's** consumption, summed across every agent it called, not one model
-call's. That is the number that answers "what did this conversation cost".
+**What the turn cost is not on the turn.** The model that served it and the tokens it
+burned live on `aeko_metrics.used_agents`, per agent invocation — a finer account of the
+same thing (see [Event tracking](#5-event-tracking)). A rolled-up copy here would be a
+second record of one fact, free to drift from the first and impossible to tell apart once
+it had. To answer "what did this conversation cost", sum the invocations:
+
+```python
+sum(agent.input_tokens for agent in response.aeko_metrics.used_agents)
+```
 
 An answered turn is appended to the `AekoSession` you passed in, and `updated_at` is
 bumped — the same object, updated in place, so you can persist exactly what you handed
@@ -519,7 +523,7 @@ tracking = response.aeko_metrics
 #  'Roteador', 'Orquestrador', 'Guardrail de Saída', ...]
 
 sum(agent.input_tokens for agent in tracking.used_agents)
-# == response.message.input_tokens — the per-agent breakdown of the run's total
+# 176 — what the whole turn cost, guardrail retries included
 ```
 
 A turn with a rejected guardrail can reach ~16 entries. Budget the document size
@@ -739,7 +743,7 @@ worth producing.
 reply = messenger.send_message(text, session)
 plan = analyzer.analyze(markdown, id_external_inventory=502)
 
-# 3.0
+# 3.1
 reply = messenger.send_message(text, session, id_request=request_id)
 plan = analyzer.analyze(
     markdown, id_external_inventory=502, id_request=request_id
@@ -751,6 +755,7 @@ plan = analyzer.analyze(
 | `send_message()` | Add `id_request=` — required, keyword-only. Returns the same `AekoMessageResponse`, now with an `aeko_metrics` field. |
 | `analyze()` | Add `id_request=`. **Returns `AekoAnalysisResponse`, not `AekoImprovementPlan`** — read the plan off `.plan`. |
 | `AekoMessageResponse(...)` built by hand | `aeko_metrics` is a required field. |
+| `AekoMessage` | Lost `llm`, `input_tokens` and `output_tokens`. Read the cost off `aeko_metrics.used_agents` instead — and stop writing those three to `session.messages`, or ignore them on the documents you already have. |
 | Nothing else | The DTOs, the agent names, the tools, the graph and the logs are untouched. |
 
 If you build an `AekoMessageResponse` yourself (tests, fixtures), the smallest valid
@@ -964,17 +969,19 @@ db.improvement_plan.insert_one(analise.plan.model_dump(by_alias=True, exclude={"
 db.aeko_metrics.insert_one(analise.aeko_metrics.model_dump())
 ```
 
-### O que mudou na 3.0
+### O que mudou na 3.1
 
-A 3.0 faz o SDK **relatar o que cada requisição custou**. Os dois métodos passaram a exigir
+A 3.1 faz o SDK **relatar o que cada requisição custou**. Os dois métodos passaram a exigir
 um `id_request` (obrigatório e keyword-only) e devolvem um `AekoMetrics` junto da resposta:
 latência em milissegundos, descrição do erro quando houve, o fluxo (`conversational` ou
 `analytical`) e uma entrada por **chamada** de agente, com tokens de entrada e saída,
 modelo usado e as tools que aquele agente realmente chamou.
 
-Duas mudanças quebram compatibilidade: a assinatura dos dois métodos, e `analyze()`, que
+Três mudanças quebram compatibilidade: a assinatura dos dois métodos; `analyze()`, que
 agora devolve `AekoAnalysisResponse` (`.plan` + `.aeko_metrics`) em vez de
-`AekoImprovementPlan`. Quando o run falha e levanta exceção, as métricas vão anexadas nela
+`AekoImprovementPlan`; e o `AekoMessage`, que ficou só com `input`, `output` e
+`submitted_at` — `llm`, `input_tokens` e `output_tokens` saíram, porque a `AekoMetrics` já
+conta a mesma coisa por chamada de agente, e dois registros do mesmo fato divergem. Quando o run falha e levanta exceção, as métricas vão anexadas nela
 (`exc.aeko_metrics`), porque uma requisição que falhou é justamente a que mais interessa
 persistir. Os logs continuam iguais — isto acrescenta uma segunda leitura do que o run já
 observava, não substitui o stream que você lê no terminal.

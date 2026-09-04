@@ -546,33 +546,37 @@ def test_the_persisted_message_mirrors_the_collection(messenger):
         "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
     )
 
-    assert set(response.message.model_dump()) == {
-        "input", "output", "submitted_at", "llm", "input_tokens", "output_tokens",
-    }
+    assert set(response.message.model_dump()) == {"input", "output", "submitted_at"}
 
 
-def test_the_message_records_what_the_run_consumed(messenger):
+def test_what_the_run_consumed_is_reported_beside_the_turn(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    message = instance.send_message(
+    response = instance.send_message(
         "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
-    ).message
+    )
+    agents = response.aeko_metrics.used_agents
 
-    # The chat flow calls the Roteador and then the FAQ.
-    assert message.input_tokens == 2 * llm.usage_input_tokens
-    assert message.output_tokens == 2 * llm.usage_output_tokens
-    assert message.llm == llm.model
+    # The chat flow calls the Roteador and then the FAQ, and each call is
+    # accounted for on its own rather than rolled into the persisted turn.
+    assert len(agents) == 2
+    assert sum(agent.input_tokens for agent in agents) == 2 * llm.usage_input_tokens
+    assert sum(agent.output_tokens for agent in agents) == 2 * llm.usage_output_tokens
+    assert {agent.llm for agent in agents} == {llm.model}
 
 
 def test_a_provider_that_reports_no_usage_leaves_the_counters_zeroed(configured, use_fake_llm):
     use_fake_llm(CHAT_FLOW, usage_input_tokens=0, usage_output_tokens=0)
     instance = AekoMessenger(make_user())
 
-    message = instance.send_message(
+    response = instance.send_message(
         "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
-    ).message
+    )
 
-    assert (message.input_tokens, message.output_tokens) == (0, 0)
+    assert all(
+        (agent.input_tokens, agent.output_tokens) == (0, 0)
+        for agent in response.aeko_metrics.used_agents
+    )
 
 
 def test_the_answered_turn_is_appended_to_the_session(messenger):

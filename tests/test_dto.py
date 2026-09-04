@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from aeko import (
+    AekoAgentMetrics,
     AekoImprovementPlan,
     AekoMessage,
     AekoMessageResponse,
@@ -48,9 +49,6 @@ MESSAGE_DOC = {
         "na tela de login."
     ),
     "submitted_at": "2026-08-28T12:05:00Z",
-    "llm": "gpt-4o",
-    "input_tokens": 15,
-    "output_tokens": 28,
 }
 
 SESSION_DOC = {
@@ -134,8 +132,7 @@ def test_timestamps_are_parsed_as_timezone_aware_datetimes():
 def test_a_message_only_needs_what_the_user_sent():
     message = AekoMessage(input="Como redefinir minha senha?")
 
-    assert (message.output, message.llm) == ("", "")
-    assert (message.input_tokens, message.output_tokens) == (0, 0)
+    assert message.output == ""
     assert message.submitted_at.tzinfo is not None, "o timestamp precisa ser tz-aware"
 
 
@@ -183,8 +180,10 @@ def test_an_improvement_plan_without_its_required_fields_is_rejected(missing):
 
 @pytest.mark.parametrize("field", ["input_tokens", "output_tokens"])
 def test_a_negative_token_count_is_rejected(field):
+    # The counts live on the event tracking now, per agent invocation — the
+    # turn itself carries no cost of its own (see `AekoMessage`).
     with pytest.raises(ValidationError):
-        AekoMessage(input="oi", **{field: -1})
+        AekoAgentMetrics(name="FAQ", **{field: -1})
 
 
 def test_a_non_numeric_external_id_is_rejected():
@@ -194,7 +193,7 @@ def test_a_non_numeric_external_id_is_rejected():
 
 def test_a_session_validates_the_messages_it_carries():
     with pytest.raises(ValidationError):
-        AekoSession.model_validate({**SESSION_DOC, "messages": [{"llm": "gpt-4o"}]})
+        AekoSession.model_validate({**SESSION_DOC, "messages": [{"output": "sem pergunta"}]})
 
 
 # --- what reaches the prompt ---------------------------------------------
