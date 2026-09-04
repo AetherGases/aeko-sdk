@@ -416,17 +416,19 @@ def test_each_agent_carries_the_model_that_served_it(chat):
     assert {agent.llm for agent in response.aeko_metrics.used_agents} == {"fake-model"}
 
 
-def test_the_turn_total_is_still_the_sum_of_its_agents(chat):
+def test_what_a_turn_cost_is_reported_here_and_nowhere_else(chat):
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
 
     agents = response.aeko_metrics.used_agents
 
-    # Measuring each agent must not have cost the run its own aggregate, which
-    # is what "session.messages" persists.
-    assert response.message.input_tokens == sum(agent.input_tokens for agent in agents)
-    assert response.message.output_tokens == sum(agent.output_tokens for agent in agents)
+    # The turn is what the user said and what came back, nothing more: a
+    # rolled-up copy of these numbers on the persisted entry would be a second
+    # record of one fact, free to drift from this one.
+    assert set(response.message.model_dump()) == {"input", "output", "submitted_at"}
+    assert sum(agent.input_tokens for agent in agents) > 0
+    assert sum(agent.output_tokens for agent in agents) > 0
 
 
 # --- The tools an agent called -------------------------------------------

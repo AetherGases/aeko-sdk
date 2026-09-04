@@ -57,8 +57,8 @@ class FakeChatModel(BaseChatModel):
         default_response: Returned for any agent without a scripted response.
         failing_models: Model ids that should raise instead of answering, used
             to exercise the fallback wiring.
-        usage_input_tokens: Prompt tokens each call reports, so the SDK's token
-            accounting can be exercised without a real provider.
+        usage_input_tokens: Prompt tokens each call reports, so the per-agent
+            token accounting can be exercised without a real provider.
         usage_output_tokens: Completion tokens each call reports.
         calls: One (agent name, last human message) tuple per invocation, in
             call order, so tests can assert what an agent actually received.
@@ -98,8 +98,8 @@ class FakeChatModel(BaseChatModel):
         content = scripted.replace("{agent}", agent)
 
         # Both `usage_metadata` and a `model_name` are required for LangChain's
-        # usage callback to record the call, which is what fills the token and
-        # llm fields of a persisted message.
+        # usage callback to record the call, which is what fills the tokens and
+        # the model name of the agent's entry in a request's event tracking.
         message = AIMessage(
             content=content,
             usage_metadata={
