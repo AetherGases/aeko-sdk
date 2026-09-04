@@ -37,6 +37,10 @@ USER_ID = "64b8f0a1c9e1a2b3c4d5e6f1"
 SESSION_ID = "64b8f0a1c9e1a2b3c4d5e6f3"
 INVENTORY_ID = 502
 
+# What the API correlates one request by, and the only thing it has to supply
+# that the SDK cannot derive for itself.
+REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
+
 FAQ_ANSWER = "Hidrogenio verde e produzido por eletrolise com energia renovavel."
 
 CHAT_FLOW = {
@@ -363,7 +367,7 @@ def test_registered_tools_reach_the_agent_that_answers(messenger):
     })
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     assert "consulta_precos - Consulta o preco medio." in llm.system_prompt_for("FAQ")
 
@@ -374,7 +378,7 @@ def test_registered_tools_reach_the_agent_that_answers(messenger):
 def test_every_memory_reaches_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW, memories=make_memories())
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     for agent in ("Roteador", "FAQ"):
         prompt = llm.prompt_for(agent)
@@ -387,7 +391,7 @@ def test_every_memory_reaches_the_agents(messenger):
 def test_the_memories_reach_the_specialists_and_the_orchestrator(messenger):
     instance, llm = messenger(ANALYSIS_FLOW, memories=make_memories())
 
-    instance.send_message("Analise meus fornos.", make_session())
+    instance.send_message("Analise meus fornos.", make_session(), id_request=REQUEST_ID)
 
     for agent in ("Analista de Poluentes", "Orquestrador"):
         assert "Opera dois fornos a gas natural" in llm.prompt_for(agent), (
@@ -398,7 +402,7 @@ def test_the_memories_reach_the_specialists_and_the_orchestrator(messenger):
 def test_the_memories_are_rendered_as_field_and_description(messenger):
     instance, llm = messenger(CHAT_FLOW, memories=make_memories())
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -411,7 +415,7 @@ def test_the_memories_are_rendered_as_field_and_description(messenger):
 def test_a_user_without_memories_renders_no_memory_section(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -424,7 +428,7 @@ def test_a_user_without_memories_renders_no_memory_section(messenger):
 def test_the_memories_keep_their_bookkeeping_fields_out_of_the_prompt(messenger):
     instance, llm = messenger(CHAT_FLOW, memories=make_memories())
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -437,7 +441,7 @@ def test_the_memories_keep_their_bookkeeping_fields_out_of_the_prompt(messenger)
 def test_the_prompts_no_longer_delegate_the_memories_to_a_tool(messenger):
     instance, llm = messenger(CHAT_FLOW, memories=make_memories())
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     for agent in ("Roteador", "FAQ"):
         system_prompt = llm.system_prompt_for(agent)
@@ -452,7 +456,7 @@ def test_the_prompts_no_longer_delegate_the_memories_to_a_tool(messenger):
 def test_the_guardrail_reviews_the_draft_without_the_memories(messenger):
     instance, llm = messenger(ANALYSIS_FLOW, memories=make_memories())
 
-    instance.send_message("Analise meus fornos.", make_session())
+    instance.send_message("Analise meus fornos.", make_session(), id_request=REQUEST_ID)
 
     assert "Prefere respostas em portugues" not in llm.prompt_for("Guardrail de Saída"), (
         "o guardrail julga o rascunho contra a pergunta e as analises, e so"
@@ -476,7 +480,7 @@ def test_the_messenger_holds_no_session_after_answering(messenger):
     instance, _ = messenger(CHAT_FLOW)
     session = make_session()
 
-    instance.send_message("O que e hidrogenio verde?", session)
+    instance.send_message("O que e hidrogenio verde?", session, id_request=REQUEST_ID)
 
     held = [value for value in vars(instance).values() if isinstance(value, AekoSession)]
 
@@ -492,8 +496,8 @@ def test_one_messenger_serves_several_sessions_without_mixing_them(messenger):
     instance, llm = messenger(CHAT_FLOW)
     first, second = make_session(id="sess-a"), make_session(id="sess-b")
 
-    instance.send_message("primeira pergunta", first)
-    instance.send_message("outra pergunta", second)
+    instance.send_message("primeira pergunta", first, id_request=REQUEST_ID)
+    instance.send_message("outra pergunta", second, id_request=REQUEST_ID)
 
     assert "primeira pergunta" not in llm.prompt_for("Roteador"), (
         "a mesma instancia nao pode vazar uma conversa para dentro de outra"
@@ -508,13 +512,15 @@ def test_send_message_requires_configuration():
     instance = AekoMessenger(make_user())
 
     with pytest.raises(AekoNotConfiguredError):
-        instance.send_message("oi", make_session())
+        instance.send_message("oi", make_session(), id_request=REQUEST_ID)
 
 
 def test_send_message_returns_a_message_ready_to_persist(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?", make_session())
+    response = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    )
 
     assert isinstance(response, AekoMessageResponse)
     assert isinstance(response.message, AekoMessage)
@@ -525,7 +531,9 @@ def test_send_message_returns_a_message_ready_to_persist(messenger):
 def test_the_response_says_which_session_and_user_it_belongs_to(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?", make_session())
+    response = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    )
 
     assert response.id_session == SESSION_ID
     assert response.id_user == USER_ID
@@ -534,7 +542,9 @@ def test_the_response_says_which_session_and_user_it_belongs_to(messenger):
 def test_the_persisted_message_mirrors_the_collection(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?", make_session())
+    response = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    )
 
     assert set(response.message.model_dump()) == {
         "input", "output", "submitted_at", "llm", "input_tokens", "output_tokens",
@@ -544,7 +554,9 @@ def test_the_persisted_message_mirrors_the_collection(messenger):
 def test_the_message_records_what_the_run_consumed(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    message = instance.send_message("O que e hidrogenio verde?", make_session()).message
+    message = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    ).message
 
     # The chat flow calls the Roteador and then the FAQ.
     assert message.input_tokens == 2 * llm.usage_input_tokens
@@ -556,7 +568,9 @@ def test_a_provider_that_reports_no_usage_leaves_the_counters_zeroed(configured,
     use_fake_llm(CHAT_FLOW, usage_input_tokens=0, usage_output_tokens=0)
     instance = AekoMessenger(make_user())
 
-    message = instance.send_message("O que e hidrogenio verde?", make_session()).message
+    message = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    ).message
 
     assert (message.input_tokens, message.output_tokens) == (0, 0)
 
@@ -565,7 +579,9 @@ def test_the_answered_turn_is_appended_to_the_session(messenger):
     session = make_session()
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?", session)
+    response = instance.send_message(
+        "O que e hidrogenio verde?", session, id_request=REQUEST_ID
+    )
 
     assert session.messages == [response.message]
     assert session.messages[-1] is response.message, "a sessao e atualizada in-place"
@@ -577,7 +593,9 @@ def test_the_answered_turn_is_appended_to_the_session(messenger):
 def test_answer_is_free_of_the_routing_marker(messenger):
     instance, _ = messenger(ANALYSIS_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
+    response = instance.send_message(
+        "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+    )
 
     assert response.message.output == CONSOLIDATED
     assert "Next agent" not in response.message.output
@@ -586,7 +604,9 @@ def test_answer_is_free_of_the_routing_marker(messenger):
 def test_response_reports_the_agents_that_contributed(messenger):
     instance, _ = messenger(ANALYSIS_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
+    response = instance.send_message(
+        "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+    )
 
     assert "Analista de Poluentes" in response.agents_called
     assert response.approved is True
@@ -596,7 +616,9 @@ def test_response_reports_the_agents_that_contributed(messenger):
 def test_a_terminal_agent_without_analysis_is_still_reported(messenger):
     instance, _ = messenger(CHAT_FLOW)
 
-    response = instance.send_message("O que e hidrogenio verde?", make_session())
+    response = instance.send_message(
+        "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
+    )
 
     # The FAQ answers directly and never writes to "previous_agents".
     assert response.agents_called == ["FAQ"]
@@ -605,7 +627,7 @@ def test_a_terminal_agent_without_analysis_is_still_reported(messenger):
 def test_the_user_role_and_usecase_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -616,7 +638,7 @@ def test_the_user_role_and_usecase_reach_the_agents(messenger):
 def test_the_identifiers_never_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -628,8 +650,8 @@ def test_previous_turns_reach_the_agents(messenger):
     instance, llm = messenger(CHAT_FLOW)
     session = make_session()
 
-    instance.send_message("O que e hidrogenio verde?", session)
-    instance.send_message("E a amonia verde?", session)
+    instance.send_message("O que e hidrogenio verde?", session, id_request=REQUEST_ID)
+    instance.send_message("E a amonia verde?", session, id_request=REQUEST_ID)
 
     last_prompt = llm.prompt_for("FAQ")
 
@@ -644,7 +666,7 @@ def test_a_resumed_session_carries_its_history_into_the_first_message(messenger)
     ])
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("E hoje?", session)
+    instance.send_message("E hoje?", session, id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -658,7 +680,7 @@ def test_only_the_last_turns_of_the_session_reach_the_agents(messenger):
     ])
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("E agora?", session)
+    instance.send_message("E agora?", session, id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -675,7 +697,7 @@ def test_the_limit_counts_turns_of_the_session(messenger):
     ])
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("E agora?", session)
+    instance.send_message("E agora?", session, id_request=REQUEST_ID)
 
     replayed = llm.prompt_for("Roteador").count("Usuário: pergunta")
 
@@ -688,7 +710,7 @@ def test_a_session_shorter_than_the_limit_is_replayed_whole(messenger):
     ])
     instance, llm = messenger(CHAT_FLOW)
 
-    instance.send_message("E agora?", session)
+    instance.send_message("E agora?", session, id_request=REQUEST_ID)
 
     prompt = llm.prompt_for("Roteador")
 
@@ -702,7 +724,7 @@ def test_the_session_keeps_its_whole_history_even_past_the_limit(messenger):
     ])
     instance, _ = messenger(CHAT_FLOW)
 
-    instance.send_message("E agora?", session)
+    instance.send_message("E agora?", session, id_request=REQUEST_ID)
 
     assert len(session.messages) == 21
     assert session.messages[0].input == "pergunta 0"
@@ -711,7 +733,9 @@ def test_the_session_keeps_its_whole_history_even_past_the_limit(messenger):
 def test_a_rejected_draft_produces_no_answer(messenger):
     instance, _ = messenger(REJECTED_FLOW)
 
-    response = instance.send_message("Quais os riscos do meu inventario?", make_session())
+    response = instance.send_message(
+        "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+    )
 
     assert response.message.output == ""
     assert response.approved is False
@@ -722,8 +746,8 @@ def test_a_rejected_turn_does_not_pollute_the_history(messenger):
     session = make_session()
     instance, llm = messenger(REJECTED_FLOW)
 
-    instance.send_message("Quais os riscos do meu inventario?", session)
-    instance.send_message("E agora?", session)
+    instance.send_message("Quais os riscos do meu inventario?", session, id_request=REQUEST_ID)
+    instance.send_message("E agora?", session, id_request=REQUEST_ID)
 
     assert session.messages == [], "so o resultado final e gravado; um reprovado nao e"
     assert "Histórico da conversa" not in llm.prompt_for("Roteador")
@@ -733,10 +757,10 @@ def test_sessions_are_isolated_from_each_other(configured, use_fake_llm):
     llm = use_fake_llm(CHAT_FLOW)
 
     first = AekoMessenger(make_user())
-    first.send_message("primeira pergunta", make_session(id="sess-a"))
+    first.send_message("primeira pergunta", make_session(id="sess-a"), id_request=REQUEST_ID)
 
     second = AekoMessenger(make_user())
-    second.send_message("outra pergunta", make_session(id="sess-b"))
+    second.send_message("outra pergunta", make_session(id="sess-b"), id_request=REQUEST_ID)
 
     assert "primeira pergunta" not in llm.prompt_for("Roteador")
 
@@ -757,8 +781,9 @@ def test_analyze_returns_an_improvement_plan(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert isinstance(plan, AekoImprovementPlan)
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
@@ -770,15 +795,16 @@ def test_the_analyzed_inventory_must_be_named(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     with pytest.raises(TypeError):
-        AekoInventoryAnalyzer().analyze(INVENTORY_MD, INVENTORY_ID)
+        AekoInventoryAnalyzer().analyze(INVENTORY_MD, INVENTORY_ID, id_request=REQUEST_ID)
 
 
 def test_the_plan_is_tied_to_the_analyzed_inventory(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.id_external_inventory == INVENTORY_ID
     assert plan.id is None, "o _id e gerado pelo banco, nunca pelo SDK"
@@ -789,8 +815,9 @@ def test_the_plan_mirrors_the_collection(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert set(plan.model_dump(by_alias=True)) == {
         "_id", "id_external_inventory", "defined_problem", "method", "reasoning",
@@ -804,8 +831,9 @@ def test_the_model_cannot_smuggle_fields_into_the_plan(configured, use_fake_llm)
     ))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.id is None
     assert plan.id_external_inventory == INVENTORY_ID
@@ -816,8 +844,9 @@ def test_the_sections_are_read_whatever_order_they_come_in(configured, use_fake_
     use_fake_llm(_coordinator_answers(as_sections(reversed_fields)))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
     assert plan.reasoning == PLAN_FIELDS["reasoning"]
@@ -829,8 +858,9 @@ def test_anything_written_before_the_first_section_is_dropped(configured, use_fa
     ))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
 
@@ -840,8 +870,9 @@ def test_a_heading_inside_a_section_does_not_cut_it_short(configured, use_fake_l
     use_fake_llm(_coordinator_answers(as_sections({**PLAN_FIELDS, "method": method})))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.method == method, "so os titulos pedidos separam secoes"
 
@@ -851,7 +882,8 @@ def test_an_answer_in_prose_is_refused(configured, use_fake_llm):
 
     with pytest.raises(MalformedAgentOutputError):
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
         )
 
 
@@ -862,7 +894,8 @@ def test_an_incomplete_plan_is_refused(configured, use_fake_llm, missing):
 
     with pytest.raises(MalformedAgentOutputError) as exc:
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
         )
 
     assert missing in str(exc.value), "o erro deve dizer qual campo faltou"
@@ -874,7 +907,8 @@ def test_a_section_left_empty_is_refused(configured, use_fake_llm, empty):
 
     with pytest.raises(MalformedAgentOutputError) as exc:
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
         )
 
     assert empty in str(exc.value)
@@ -896,8 +930,9 @@ def test_a_badly_formatted_plan_is_sent_back_to_the_coordinator(configured, use_
     })
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID
-    )
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+    ).plan
 
     assert plan.method == PLAN_FIELDS["method"]
     assert _coordinator_calls(llm) == 2
@@ -912,7 +947,9 @@ def test_only_the_coordinator_answers_again_on_a_retry(configured, use_fake_llm)
         ],
     })
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     analysts = [name for name, _ in llm.calls if name != "Coordenador de Melhoria Contínua"]
     assert len(analysts) == len(set(analysts)), "refazer o formato nao refaz a analise"
@@ -927,7 +964,9 @@ def test_the_retry_tells_the_coordinator_which_sections_are_missing(configured, 
         ],
     })
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     retry = llm.prompt_for("Coordenador de Melhoria Contínua")
     assert f'"## {PLAN_SECTIONS["method"]}"' in retry
@@ -940,7 +979,8 @@ def test_a_plan_never_formatted_is_refused_after_every_retry(configured, use_fak
 
     with pytest.raises(MalformedAgentOutputError):
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
         )
 
     assert _coordinator_calls(llm) == PLAN_FORMAT_MAX_RETRIES + 1
@@ -949,7 +989,9 @@ def test_a_plan_never_formatted_is_refused_after_every_retry(configured, use_fak
 def test_a_well_formed_plan_is_never_retried(configured, use_fake_llm):
     llm = use_fake_llm(INVENTORY_FLOW)
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert _coordinator_calls(llm) == 1
 
@@ -960,7 +1002,9 @@ def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
         "Coordenador de Melhoria Contínua": "Plano em prosa, sem secoes.\nNext agent: Nenhum",
     })
 
-    response = AekoMessenger(make_user()).send_message("como melhoro o forno?", make_session())
+    response = AekoMessenger(make_user()).send_message(
+        "como melhoro o forno?", make_session(), id_request=REQUEST_ID
+    )
 
     assert _coordinator_calls(llm) == 1, "so o fluxo de inventario valida o formato"
     assert response.message.output == "Plano em prosa, sem secoes."
@@ -969,7 +1013,9 @@ def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
 def test_analyze_enters_through_the_inventory_analyst(configured, use_fake_llm):
     llm = use_fake_llm(INVENTORY_FLOW)
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert llm.agents_called()[0] == "Análista de inventários"
     assert "Roteador" not in llm.agents_called()
@@ -978,7 +1024,9 @@ def test_analyze_enters_through_the_inventory_analyst(configured, use_fake_llm):
 def test_analyze_forwards_the_inventory_to_the_first_agent(configured, use_fake_llm):
     llm = use_fake_llm(INVENTORY_FLOW)
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert INVENTORY_MD in llm.prompt_for("Análista de inventários")
 
@@ -988,7 +1036,7 @@ def test_set_context_reaches_the_agents(configured, use_fake_llm):
     analyzer = AekoInventoryAnalyzer()
     analyzer.set_context("Relatorio 2022: 2.100 tCO2e, foco em fornos.")
 
-    analyzer.analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    analyzer.analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID)
 
     assert "Relatorio 2022" in llm.prompt_for("Análista de inventários")
 
@@ -1006,7 +1054,9 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
     monkeypatch.setattr("aeko.engine.agents.agents.create_llms", _spy)
     RUNTIME.agents.clear()
 
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert caps == [DEFAULT_REPORT_MAX_TOKENS]
     assert list(RUNTIME.agents) == [DEFAULT_REPORT_MAX_TOKENS]
@@ -1026,7 +1076,7 @@ def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch)
     RUNTIME.agents.clear()
 
     instance = AekoMessenger(make_user())
-    instance.send_message("O que e hidrogenio verde?", make_session())
+    instance.send_message("O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID)
 
     assert caps == [DEFAULT_MAX_TOKENS], (
         "o fluxo conversacional usa o teto padrao, nao o de relatorio"

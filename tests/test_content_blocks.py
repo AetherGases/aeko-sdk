@@ -28,6 +28,10 @@ API_KEY = "fake-api-key"
 USER_ID = "64b8f0a1c9e1a2b3c4d5e6f1"
 SESSION_ID = "64b8f0a1c9e1a2b3c4d5e6f3"
 
+# What the API correlates one request by, and the only thing it has to supply
+# that the SDK cannot derive for itself.
+REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
+
 FAQ_ANSWER = "Hidrogenio verde e produzido por eletrolise com energia renovavel."
 
 # The block an agent's private thinking arrives in. No assertion in this file
@@ -154,7 +158,9 @@ def test_a_tool_calling_agent_delivers_plain_text(configured, thinking_llm):
     thinking_llm(CHAT_FLOW)
     session = make_session()
 
-    response = AekoMessenger(make_user()).send_message("O que e H2 verde?", session)
+    response = AekoMessenger(make_user()).send_message(
+        "O que e H2 verde?", session, id_request=REQUEST_ID
+    )
 
     assert response.message.output == FAQ_ANSWER
     assert THINKING not in response.message.output
