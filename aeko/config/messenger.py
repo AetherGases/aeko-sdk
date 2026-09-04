@@ -19,10 +19,6 @@ from aeko.shared import Flow, log_failure, log_success, processing
 
 # The module bracket every line written from here carries.
 LOG_MODULE = "messenger"
-from aeko.shared import Flow, log_failure, log_success, processing
-
-# The module bracket every line written from here carries.
-LOG_MODULE = "messenger"
 
 
 def _final_answer(result: dict) -> str:
@@ -230,30 +226,12 @@ class AekoMessenger:
                     LOG_MODULE,
                     f"Tool registration refused: {agent!r} is not an agent of the system.",
                 )
-                log_failure(
-                    LOG_MODULE,
-                    f"Tool registration refused: {agent!r} is not an agent of the system.",
-                )
                 raise UnknownAgentError(agent, AGENT_NAMES)
 
             normalized[agent] = [AekoTool.wrap(tool) for tool in agent_tools]
 
         RUNTIME.configure(tools=normalized)
 
-        # Which agents were equipped, and with how many tools each — never what
-        # a tool is or when one runs: registering tools is configuration, using
-        # one is the agent's business and is deliberately left unlogged.
-        registered = ", ".join(
-            f"{agent}={len(agent_tools)}" for agent, agent_tools in normalized.items()
-        )
-        log_success(
-            LOG_MODULE,
-            f"Tools registered for {len(normalized)} agent(s)"
-            + (f": {registered}" if registered else "."),
-        )
-
-    def send_message(self, message: str, session: AekoSession, *,
-                     id_request: str) -> AekoMessageResponse:
         # Which agents were equipped, and with how many tools each — never what
         # a tool is or when one runs: registering tools is configuration, using
         # one is the agent's business and is deliberately left unlogged.
@@ -290,15 +268,9 @@ class AekoMessenger:
                 the returned event tracking. The SDK reads no database and
                 cannot derive one, so it is required rather than invented, and
                 keyword-only: it is bookkeeping, not part of the conversation.
-            id_request: What the API correlates this request by, echoed back in
-                the returned event tracking. The SDK reads no database and
-                cannot derive one, so it is required rather than invented, and
-                keyword-only: it is bookkeeping, not part of the conversation.
 
         Returns:
             AekoMessageResponse: The turn to persist, the session and user it
-                belongs to, which agents contributed, the output guardrail's
-                verdict, and what the request cost.
                 belongs to, which agents contributed, the output guardrail's
                 verdict, and what the request cost.
 
@@ -311,20 +283,6 @@ class AekoMessenger:
             company_context=self._context(),
             history=_history_from(session),
         )
-
-        # One record is written for this whole turn, when it ends, listing what
-        # it went through — every agent the graph called included, which reach
-        # the list on their own (see `record_agent_call`). The message itself is
-        # never logged: it is the user's, and its length says as much about the
-        # turn as its text does. Read before the answer is appended below, so
-        # the history is the one the agents actually saw.
-        with processing(Flow.CONVERSATIONAL, LOG_MODULE, id_request) as run:
-            run.item("session", session.id or "-")
-            run.item("user", session.id_user or "-")
-            run.item(
-                "input",
-                f"{len(message)} characters, {len(session.messages)} history turns",
-            )
 
         # One record is written for this whole turn, when it ends, listing what
         # it went through — every agent the graph called included, which reach
@@ -354,23 +312,7 @@ class AekoMessenger:
             if answer:
                 session.messages.append(turn)
                 session.updated_at = turn.submitted_at
-            if answer:
-                session.messages.append(turn)
-                session.updated_at = turn.submitted_at
 
-            # A turn that produced no answer returns normally but delivers
-            # nothing to the user, and is reported as the failure it is (see
-            # `_final_answer` for how a run ends up with one).
-            if not answer:
-                run.fail("no answer approved by the output guardrail")
-
-            agents_called = _agents_called(result)
-            approved = bool(result.get("guard_rail_approved"))
-            guardrail_retries = int(result.get("guard_rail_retries", 0))
-
-        # Assembled once the run has closed, which is when its event tracking
-        # is settled: a turn the guardrail rejected has to carry that failure,
-        # and the latency has to be the request's, not the caller's.
             # A turn that produced no answer returns normally but delivers
             # nothing to the user, and is reported as the failure it is (see
             # `_final_answer` for how a run ends up with one).
@@ -387,12 +329,8 @@ class AekoMessenger:
         return AekoMessageResponse(
             message=turn,
             aeko_metrics=run.event_tracking(),
-            aeko_metrics=run.event_tracking(),
             id_session=session.id,
             id_user=session.id_user,
-            agents_called=agents_called,
-            approved=approved,
-            guardrail_retries=guardrail_retries,
             agents_called=agents_called,
             approved=approved,
             guardrail_retries=guardrail_retries,
