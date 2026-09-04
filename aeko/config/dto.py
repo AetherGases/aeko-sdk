@@ -179,22 +179,22 @@ class AekoMessage(BaseModel):
     """
     One exchanged turn, mirroring an entry of "session.messages".
 
+    What the turn *cost* is deliberately not here. The model that served it and
+    the tokens it burned are reported per agent invocation on the request's
+    `AekoMetrics`, which is a finer account of the same thing — carrying a
+    rolled-up copy alongside it would be two records of one fact, free to drift
+    apart and impossible to tell apart once they had.
+
     Attributes:
         input: What the user sent.
         output: The answer delivered back. Empty when the run produced none —
             the output guardrail can reject a draft past its retry cap.
         submitted_at: When the turn was answered.
-        llm: The model(s) that served the turn, as reported by the provider.
-        input_tokens: Prompt tokens the whole run consumed, across every agent.
-        output_tokens: Completion tokens the whole run produced.
     """
 
     input: str
     output: str = ""
     submitted_at: datetime = Field(default_factory=_now)
-    llm: str = ""
-    input_tokens: int = Field(default=0, ge=0)
-    output_tokens: int = Field(default=0, ge=0)
 
 
 class AekoSession(BaseModel):

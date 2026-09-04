@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from aeko import (
+    AekoAgentMetrics,
     AekoImprovementPlan,
     AekoMessage,
     AekoMessageResponse,
@@ -48,9 +49,6 @@ MESSAGE_DOC = {
         "na tela de login."
     ),
     "submitted_at": "2026-08-28T12:05:00Z",
-    "llm": "gpt-4o",
-    "input_tokens": 15,
-    "output_tokens": 28,
 }
 
 SESSION_DOC = {
@@ -134,8 +132,7 @@ def test_timestamps_are_parsed_as_timezone_aware_datetimes():
 def test_a_message_only_needs_what_the_user_sent():
     message = AekoMessage(input="Como redefinir minha senha?")
 
-    assert (message.output, message.llm) == ("", "")
-    assert (message.input_tokens, message.output_tokens) == (0, 0)
+    assert message.output == ""
     assert message.submitted_at.tzinfo is not None, "o timestamp precisa ser tz-aware"
 
 
@@ -183,8 +180,10 @@ def test_an_improvement_plan_without_its_required_fields_is_rejected(missing):
 
 @pytest.mark.parametrize("field", ["input_tokens", "output_tokens"])
 def test_a_negative_token_count_is_rejected(field):
+    # The counts live on the event tracking now, per agent invocation — the
+    # turn itself carries no cost of its own (see `AekoMessage`).
     with pytest.raises(ValidationError):
-        AekoMessage(input="oi", **{field: -1})
+        AekoAgentMetrics(name="FAQ", **{field: -1})
 
 
 def test_a_non_numeric_external_id_is_rejected():
@@ -194,7 +193,7 @@ def test_a_non_numeric_external_id_is_rejected():
 
 def test_a_session_validates_the_messages_it_carries():
     with pytest.raises(ValidationError):
-        AekoSession.model_validate({**SESSION_DOC, "messages": [{"llm": "gpt-4o"}]})
+        AekoSession.model_validate({**SESSION_DOC, "messages": [{"output": "sem pergunta"}]})
 
 
 # --- what reaches the prompt ---------------------------------------------
@@ -255,9 +254,25 @@ def make_metrics() -> AekoMetrics:
     return AekoMetrics(id_request="req-1", flow="conversational")
 
 
+def make_metrics() -> AekoMetrics:
+    """
+    The event tracking every response carries, as `send_message()` fills it.
+
+    These tests are about the envelope, not about what it measured, so the
+    cheapest valid one will do — what matters here is that a response cannot be
+    built without one.
+
+    Returns:
+        AekoMetrics: An event tracking for a request that went fine.
+    """
+
+    return AekoMetrics(id_request="req-1", flow="conversational")
+
+
 def test_the_response_carries_a_persistable_message_plus_run_metadata():
     response = AekoMessageResponse(
         message=AekoMessage.model_validate(MESSAGE_DOC),
+        aeko_metrics=make_metrics(),
         aeko_metrics=make_metrics(),
         agents_called=["Roteador", "FAQ"],
         approved=True,
@@ -273,6 +288,7 @@ def test_the_response_carries_the_identifiers_it_belongs_to():
     response = AekoMessageResponse(
         message=AekoMessage(input="oi"),
         aeko_metrics=make_metrics(),
+        aeko_metrics=make_metrics(),
         id_session=SESSION_DOC["_id"],
         id_user=USER_DOC["_id"],
     )
@@ -287,6 +303,10 @@ def test_the_identifiers_stay_out_of_the_persisted_message():
         aeko_metrics=make_metrics(),
         id_session="s1",
         id_user="u1",
+        message=AekoMessage(input="oi"),
+        aeko_metrics=make_metrics(),
+        id_session="s1",
+        id_user="u1",
     )
 
     assert set(response.message.model_dump()) == set(MESSAGE_DOC), (
@@ -296,6 +316,10 @@ def test_the_identifiers_stay_out_of_the_persisted_message():
 
 def test_the_run_metadata_stays_out_of_the_persisted_message():
     response = AekoMessageResponse(
+        message=AekoMessage(input="oi"),
+        aeko_metrics=make_metrics(),
+        agents_called=["FAQ"],
+        approved=True,
         message=AekoMessage(input="oi"),
         aeko_metrics=make_metrics(),
         agents_called=["FAQ"],
