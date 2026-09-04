@@ -1,5 +1,5 @@
 from aeko.config._text import parse_sections, strip_routing_marker
-from aeko.config.dto import AekoImprovementPlan
+from aeko.config.dto import AekoAnalysisResponse, AekoImprovementPlan
 from aeko.config.exceptions import MalformedAgentOutputError
 from aeko.engine._content import text_of
 from aeko.engine.graph.builder import get_app
@@ -154,7 +154,8 @@ class AekoInventoryAnalyzer:
 
         self._context = context or ""
 
-    def analyze(self, inventory: str, *, id_external_inventory: int) -> AekoImprovementPlan:
+    def analyze(self, inventory: str, *, id_external_inventory: int,
+                id_request: str) -> AekoAnalysisResponse:
         """
         Analyze a GHG inventory and return the improvement plan.
 
@@ -173,15 +174,21 @@ class AekoInventoryAnalyzer:
                 reads the database, so this cannot be derived here. Keyword-only:
                 two arguments that are both "the inventory" are worth naming at
                 every call site.
+            id_request: What the API correlates this request by, echoed back in
+                the returned event tracking. Required for the same reason
+                `id_external_inventory` is: the SDK reads no database and has
+                no way to derive one.
 
         Returns:
-            AekoImprovementPlan: The plan, mirroring one document of the
-                "improvement_plan" collection.
+            AekoAnalysisResponse: The plan to persist, mirroring one document of
+                the "improvement_plan" collection, and what producing it cost.
 
         Raises:
             AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
             MalformedAgentOutputError: If the coordinator's answer still doesn't
-                match the shape its prompt demands after every retry.
+                match the shape its prompt demands after every retry. Its
+                `aeko_metrics` carries what the failed analysis went through,
+                since there is no response left to carry it back.
         """
 
         state = create_initial_state(inventory, company_context=self._context)
@@ -189,7 +196,7 @@ class AekoInventoryAnalyzer:
         # Wraps the parsing as well as the run: an answer that never took the
         # requested shape is a request that failed, and is logged in red as one
         # by the exception `_to_improvement_plan` raises.
-        with processing(Flow.REPORT, LOG_MODULE) as run:
+        with processing(Flow.REPORT, LOG_MODULE, id_request) as run:
             run.item("inventory", id_external_inventory)
             run.item("input", f"{len(inventory)} characters")
 
@@ -216,4 +223,7 @@ class AekoInventoryAnalyzer:
 
             plan = _to_improvement_plan(answer, id_external_inventory)
 
-        return plan
+        # Assembled once the run has closed, so the latency it reports is the
+        # analysis's own. A run that never got here raised instead, carrying the
+        # same event tracking out on the exception (see `processing`).
+        return AekoAnalysisResponse(plan=plan, aeko_metrics=run.event_tracking())

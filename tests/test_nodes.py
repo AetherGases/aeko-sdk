@@ -5,12 +5,23 @@ from aeko.engine.graph.state import create_initial_state
 
 
 class _FakeAgent:
+    """
+    A stand-in for one `AgentExecutor`, taking what a real one takes.
+
+    The `config` is accepted rather than ignored because `_invoke_agent` passes
+    one: it is how the per-call event tracking collector reaches the agent's
+    own run (see aeko/shared/event_tracking.py). A double that refused it would
+    pass while the graph broke.
+    """
+
     def __init__(self, output: str):
         self.output = output
         self.last_input = None
+        self.last_config = None
 
-    def invoke(self, input_):
+    def invoke(self, input_, config=None):
         self.last_input = input_
+        self.last_config = config
         return {"output": self.output}
 
 
@@ -169,7 +180,7 @@ class _ScriptedAgent:
         self.outputs = list(outputs)
         self.inputs = []
 
-    def invoke(self, input_):
+    def invoke(self, input_, config=None):
         self.inputs.append(input_)
         return {"output": self.outputs[min(len(self.inputs) - 1, len(self.outputs) - 1)]}
 

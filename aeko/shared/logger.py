@@ -9,6 +9,12 @@ from typing import Any, IO, Iterator
 
 from aeko.shared.colors import RED, colorize, success_color
 from aeko.shared.context import Flow, bind_run, current_run, unbind_run
+from aeko.shared.event_tracking import (
+    EVENT_TRACKING_FLOWS,
+    METRICS_ATTR,
+    AekoMetrics,
+    AgentCall,
+)
 
 # The bracket every line of this SDK opens with, so a consuming API can tell
 # our lines from its own at a glance.
@@ -247,6 +253,11 @@ def record_agent_call(agent_name: str, seconds: float) -> None:
     whatever ran last: the graph can be driven directly, and a run nobody
     opened has no log to belong to.
 
+    Records the name and the duration alone. What an agent *cost* — its tokens,
+    its model, the tools it called — is collected by `agent_call()`, which is
+    what the graph invokes agents through; this stays for anyone reporting a
+    call they only timed.
+
     Args:
         agent_name: The agent, under the exact name the graph routes it by.
         seconds: How long the invocation took.
@@ -255,7 +266,7 @@ def record_agent_call(agent_name: str, seconds: float) -> None:
     run = current_run()
 
     if run is not None:
-        run.agent_called(agent_name, seconds)
+        run.agent_called(AgentCall(name=agent_name, seconds=seconds))
 
 
 def _as_millis(seconds: float) -> str:
@@ -281,26 +292,41 @@ class Processing:
     request ends, as one record — a header saying how it went and how long it
     took, followed by an indented list of what it did.
 
+    The same accumulation is what the request's `AekoMetrics` is built from
+    (see `event_tracking`), so the log a person reads and the row the API
+    persists are two renderings of one account rather than two accounts.
+
     Attributes:
         flow: The flow this request belongs to.
         module: The module bracket its record is written under.
+        id_request: What the API correlates this request by, echoed into its
+            event tracking. Empty for a run opened outside the public facade,
+            which nobody is going to persist.
     """
 
-    def __init__(self, flow: Flow, module: str):
+    def __init__(self, flow: Flow, module: str, id_request: str = ""):
         """
         Open a handle on a request that is starting.
 
         Args:
             flow: The flow this request belongs to.
             module: The module bracket its record is written under.
+            id_request: The API's id for this request, if it supplied one.
         """
 
         self.flow = flow
         self.module = module
+        self.id_request = id_request
         self._items: list[tuple[str, str]] = []
-        self._agents: list[tuple[str, float]] = []
+        self._agents: list[AgentCall] = []
         self._failure: str | None = None
         self._started = perf_counter()
+
+        # Both frozen by `_close`, so the event tracking a caller reads after
+        # the request ended reports the request's own duration and outcome
+        # rather than however long it took them to ask.
+        self._latency: int | None = None
+        self._error_description: str | None = None
 
     def item(self, label: str, value: Any) -> None:
         """
@@ -316,7 +342,7 @@ class Processing:
 
         self._items.append((label, str(value)))
 
-    def agent_called(self, agent_name: str, seconds: float) -> None:
+    def agent_called(self, call: AgentCall) -> None:
         """
         Record one agent invocation, to be listed among the others.
 
@@ -325,11 +351,12 @@ class Processing:
         loop is visible in the line rather than hidden by it.
 
         Args:
-            agent_name: The agent, under the exact name the graph routes it by.
-            seconds: How long the invocation took.
+            call: The invocation, with whatever was measured about it. The log
+                line reads its name and duration; its event tracking reads the
+                rest.
         """
 
-        self._agents.append((agent_name, seconds))
+        self._agents.append(call)
 
     def fail(self, reason: str) -> None:
         """
@@ -370,7 +397,7 @@ class Processing:
 
         if self._agents:
             called = ", ".join(
-                f"{name} ({_as_millis(seconds)})" for name, seconds in self._agents
+                f"{call.name} ({_as_millis(call.seconds)})" for call in self._agents
             )
             lines.append(f"{ITEM_PREFIX}agents: {called}")
 
@@ -379,14 +406,42 @@ class Processing:
 
         return "\n" + "\n".join(lines)
 
+    def event_tracking(self) -> AekoMetrics:
+        """
+        Render this request as the row the API persists.
+
+        Built from the same accumulation the log line is written from, so the
+        agents it lists are the agents the line lists, in the same order, one
+        entry per call. Meant to be read once the request has ended — that is
+        when its duration and its outcome are settled — but reading it early
+        reports the request as it stands rather than raising.
+
+        Returns:
+            AekoMetrics: What this request cost and went through.
+        """
+
+        latency = self._latency
+
+        if latency is None:
+            latency = round(self.elapsed * 1000)
+
+        return AekoMetrics(
+            id_request=self.id_request,
+            latency=latency,
+            error_description=self._error_description,
+            flow=EVENT_TRACKING_FLOWS[self.flow],
+            used_agents=[call.to_metrics() for call in self._agents],
+        )
+
     def _close(self, error: BaseException | None = None) -> None:
         """
-        Write this request's one and only record.
+        Write this request's one and only record, and settle its event tracking.
 
         Args:
             error: The exception that ended the request, if one did.
         """
 
+        self._latency = round(self.elapsed * 1000)
         elapsed = f"{self.elapsed:.2f}s"
         details = self._details()
 
@@ -394,6 +449,8 @@ class Processing:
             reason = f"{type(error).__name__}: {error}"
         else:
             reason = self._failure
+
+        self._error_description = reason
 
         if reason is not None:
             log_failure(
@@ -411,29 +468,35 @@ class Processing:
 
 
 @contextmanager
-def processing(flow: Flow, module: str) -> Iterator[Processing]:
+def processing(flow: Flow, module: str, id_request: str = "") -> Iterator[Processing]:
     """
     Report one whole request as a single log record, written when it ends.
 
     Nothing is written while the request runs. The handle collects what the
     request did — the agents it called included, which reach it through
-    `record_agent_call` without the graph having to know a log exists — and one
-    record is written on the way out, saying how the request went, how long it
-    took, and what it went through.
+    `agent_call` without the graph having to know a log exists — and one record
+    is written on the way out, saying how the request went, how long it took,
+    and what it went through. The caller reads the same account back as an
+    `AekoMetrics` (see `Processing.event_tracking`) to hand to the API.
 
-    An exception escaping the body is reported in red and re-raised untouched:
-    this observes a request, it does not change what one does.
+    An exception escaping the body is reported in red and re-raised untouched
+    except for the event tracking attached to it: this observes a request, it
+    does not change what one does. The attachment is what lets a request that
+    raised still be persisted — there is no return value left to carry it, and
+    a failed request is the one worth recording most.
 
     Args:
         flow: The flow this request belongs to, which decides the blue its
             record is written in.
         module: The module bracket the record is written under.
+        id_request: The API's id for this request, echoed into its event
+            tracking. Empty for a run opened outside the public facade.
 
     Yields:
         Processing: The handle to report the request through.
     """
 
-    run = Processing(flow, module)
+    run = Processing(flow, module, id_request)
     token = bind_run(run)
 
     try:
@@ -441,6 +504,12 @@ def processing(flow: Flow, module: str) -> Iterator[Processing]:
             yield run
         except BaseException as error:
             run._close(error)
+
+            try:
+                setattr(error, METRICS_ATTR, run.event_tracking())
+            except AttributeError:  # pragma: no cover - an exception with __slots__
+                pass
+
             raise
 
         run._close()

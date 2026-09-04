@@ -17,6 +17,27 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
+## What's new in 3.0
+
+Version 3 makes the SDK **report what a request cost**. Both entry points now take an
+`id_request` and hand back an `AekoMetrics` alongside the answer, so the API can persist
+per-request telemetry it previously had no way to obtain. Two changes are breaking.
+
+| Area | 2.x | 3.0 |
+| --- | --- | --- |
+| `send_message()` | `send_message(message, session)` | `send_message(message, session, *, id_request)` — **required, keyword-only** |
+| `analyze()` | `analyze(inventory, *, id_external_inventory) -> AekoImprovementPlan` | `analyze(inventory, *, id_external_inventory, id_request) -> AekoAnalysisResponse` |
+| Telemetry | Logs only, readable by a person | `AekoMetrics` on every response, persistable by a machine |
+| Per-agent cost | Nothing — one total per run | Tokens, model and tools called, per agent invocation |
+| Failed requests | The exception, and nothing else | The exception, carrying the run's `aeko_metrics` |
+
+The logs are unchanged: this adds a second rendering of what a run already observed, it
+does not replace the stream you read in a terminal. See
+[Event tracking](#5-event-tracking) for the object and
+[Migrating from 2.x](#migrating-from-2x) for what to change at your call sites.
+
+---
+
 ## What's new in 2.0
 
 Version 2 reshapes the boundary between the SDK and the API that consumes it. The agent
@@ -49,8 +70,10 @@ removed name to its replacement.
   - [2. Register your tools](#2-register-your-tools)
   - [3. The conversational flow](#3-the-conversational-flow)
   - [4. The inventory flow](#4-the-inventory-flow)
-  - [5. Full example: a stateless FastAPI service](#5-full-example-a-stateless-fastapi-service)
-  - [6. Error handling](#6-error-handling)
+  - [5. Event tracking](#5-event-tracking)
+  - [6. Full example: a stateless FastAPI service](#6-full-example-a-stateless-fastapi-service)
+  - [7. Error handling](#7-error-handling)
+- [Migrating from 2.x](#migrating-from-2x)
 - [Migrating from 1.x](#migrating-from-1x)
 - [API reference](#api-reference)
 - [Development](#development)
@@ -175,11 +198,13 @@ memories = [AekoUserMemory.model_validate(document)
 
 messenger = AekoMessenger(user, memories)
 reply = messenger.send_message(
-    "What is the difference between scope 1 and scope 2?", session
+    "What is the difference between scope 1 and scope 2?", session,
+    id_request="req-8a31",   # yours, so you can correlate what the run cost
 )
 print(reply.message.output)  # the answer
 print(reply.agents_called)   # e.g. ['FAQ']
 print(reply.approved)        # guardrail verdict
+print(reply.aeko_metrics.latency)  # e.g. 2841 (ms)
 
 # `reply.message` is one entry of `session.messages`, ready to append.
 db.session.update_one(
@@ -190,8 +215,11 @@ db.session.update_one(
 analyzer = AekoInventoryAnalyzer()
 analyzer.set_context("Last report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
 
-plan = analyzer.analyze(inventory_markdown, id_external_inventory=502)
-db.improvement_plan.insert_one(plan.model_dump(by_alias=True, exclude={"id"}))
+analysis = analyzer.analyze(
+    inventory_markdown, id_external_inventory=502, id_request="req-8a32"
+)
+db.improvement_plan.insert_one(analysis.plan.model_dump(by_alias=True, exclude={"id"}))
+db.aeko_metrics.insert_one(analysis.aeko_metrics.model_dump())
 ```
 
 ---
@@ -300,9 +328,15 @@ session = AekoSession(
 )
 
 response = messenger.send_message(
-    "Our scope 1 jumped 12% this quarter. Where do I look?", session
+    "Our scope 1 jumped 12% this quarter. Where do I look?", session,
+    id_request="req-8a31",
 )
 ```
+
+`id_request` is **required and keyword-only**. It is yours: whatever your API correlates
+this request by — a trace id, a job id, the HTTP request id. The SDK reads no database and
+invents nothing, so it cannot derive one; it echoes yours back on the returned
+[event tracking](#5-event-tracking). It never reaches a prompt and is never logged.
 
 The two documents your database already holds go in as they are, so there is no separate
 "history" format to translate: `session.messages` **is** the conversation, replayed to the
@@ -329,10 +363,11 @@ you can correlate documents, and a model can do nothing with them.
 | `agents_called` | Names of the agents that contributed, in call order. |
 | `approved` | Whether the output guardrail approved the answer. |
 | `guardrail_retries` | How many times the guardrail sent the draft back. |
+| `aeko_metrics` | What the request cost and went through — see [Event tracking](#5-event-tracking). |
 
-Only `message` belongs in the database; everything else describes *how* the run reached
-the answer, or which documents it belongs to, and is deliberately not part of the
-persisted entry — `session.messages[]` carries no identifiers of its own. The identifiers
+Only `message` belongs in the `session.messages` array; everything else describes *how*
+the run reached the answer, or which documents it belongs to, and is deliberately not part
+of the persisted entry — `session.messages[]` carries no identifiers of its own. The identifiers
 are still returned so a response is enough on its own to file and log the answer against
 the right conversation. The turn itself mirrors the collection exactly:
 
@@ -383,16 +418,25 @@ analyzer = AekoInventoryAnalyzer()
 # Optional: a company's first report legitimately has no previous one.
 analyzer.set_context("2025 report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
 
-plan = analyzer.analyze(inventory_markdown, id_external_inventory=502)
+analysis = analyzer.analyze(
+    inventory_markdown, id_external_inventory=502, id_request="req-8a32"
+)
+plan = analysis.plan
 ```
 
 `analyze()` expects the inventory **rendered as Markdown** — a table is the natural shape.
 It runs with `report_max_tokens` instead of the chat cap, since this flow writes a full
 report that the chat-sized cap would truncate. `id_external_inventory` is what ties the
 resulting plan back to the inventory; the SDK never reads your database, so it cannot be
-derived here.
+derived here, and neither can `id_request` — both are required and keyword-only.
 
-It returns an `AekoImprovementPlan`, mirroring one document of the collection:
+It returns an `AekoAnalysisResponse`, an envelope of two things: `plan`, the document to
+persist, and `aeko_metrics`, what producing it cost (see
+[Event tracking](#5-event-tracking)). The metrics are an envelope field rather than a field
+of the plan because the `improvement_plan` collection has no column for a latency — a plan
+carrying its own runtime would be a document the collection never described.
+
+`analysis.plan` is an `AekoImprovementPlan`, mirroring one document of the collection:
 
 | Field | Meaning |
 | --- | --- |
@@ -440,7 +484,69 @@ token cap, on top of the analysts. A well-formed answer costs exactly one.
 There is no `approved` field: this flow ends at the continuous improvement coordinator, a
 terminal node, and never reaches the output guardrail.
 
-### 5. Full example: a stateless FastAPI service
+### 5. Event tracking
+
+Both entry points hand back an `AekoMetrics` describing the request that just ran —
+`response.aeko_metrics` on a chat turn, `analysis.aeko_metrics` on an analysis. It exists
+because the SDK writes to no database: what it observes about a run leaves with the run's
+answer or is lost when the process moves on.
+
+| Field | Meaning |
+| --- | --- |
+| `id_request` | The `id_request` you passed in, echoed back. |
+| `latency` | How long the whole request took, in whole milliseconds. |
+| `error_description` | Why it failed, or `None`. Filled for a turn the guardrail never approved, even though that turn returns normally. |
+| `flow` | `"conversational"` for `send_message()`, `"analytical"` for `analyze()`. |
+| `used_agents` | One `AekoAgentMetrics` per agent **invocation**, in call order. |
+
+Each entry of `used_agents`:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The agent, under the exact name the graph routes it by. |
+| `input_tokens` / `output_tokens` | What that single invocation consumed, the whole tool-calling loop included. |
+| `llm` | The model that served it. Comma-separated if the cross-model fallback fired mid-call. |
+| `used_tools` | The tools it **actually called**, in call order — not the ones registered for it. |
+
+**One entry per call, not per agent.** The guardrail's retry loop runs the same agents
+again and again, and a turn that paid for four routings is not a turn that paid for one:
+
+```python
+tracking = response.aeko_metrics
+
+[agent.name for agent in tracking.used_agents]
+# ['Roteador', 'Analista de Poluentes', 'Orquestrador', 'Guardrail de Saída',
+#  'Roteador', 'Orquestrador', 'Guardrail de Saída', ...]
+
+sum(agent.input_tokens for agent in tracking.used_agents)
+# == response.message.input_tokens — the per-agent breakdown of the run's total
+```
+
+A turn with a rejected guardrail can reach ~16 entries. Budget the document size
+accordingly.
+
+**A failed request still reports.** `analyze()` raises `MalformedAgentOutputError` when
+the coordinator never produces the plan's three sections, and there is no response left to
+carry the metrics — so they are attached to the exception instead:
+
+```python
+try:
+    analysis = analyzer.analyze(inventory, id_external_inventory=502, id_request=rid)
+except AekoError as exc:
+    if exc.aeko_metrics:                      # None for errors raised outside a request
+        db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
+    raise
+```
+
+`AekoError.aeko_metrics` is `None` for an error raised outside any request — a refused
+`Aeko.config()`, or tools registered for an agent that does not exist.
+
+**This does not replace the logs.** The SDK still writes one
+`[aeko-sdk] [module] [datetime] ...` line per request to its own `aeko` logger, and the
+event tracking is built from the same observations rather than from a second pass — the
+agents one lists are the agents the other lists, in the same order.
+
+### 6. Full example: a stateless FastAPI service
 
 This is the shape Aeko was designed for: an HTTP API with more than one worker, where
 conversation history lives in **your** database and is handed back to the SDK on every
@@ -454,6 +560,7 @@ from pydantic import BaseModel
 
 from aeko import (
     Aeko,
+    AekoError,
     AekoInventoryAnalyzer,
     AekoMessenger,
     AekoNotConfiguredError,
@@ -486,6 +593,7 @@ app = FastAPI(lifespan=lifespan)
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    request_id: str
 
 
 @app.post("/chat")
@@ -506,18 +614,23 @@ def chat(body: ChatRequest):
     # 2. Run it. Blocking call: keep it off the event loop in production
     #    (`run_in_threadpool`, a task queue, or a sync worker).
     try:
-        response = messenger.send_message(body.message, session)
+        response = messenger.send_message(
+            body.message, session, id_request=body.request_id
+        )
     except AekoNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # 3. The guardrail can refuse every draft — there is no answer to persist.
+    # 3. Persist what the run cost, whether or not it produced an answer.
+    db.aeko_metrics.insert_one(response.aeko_metrics.model_dump())
+
+    # 4. The guardrail can refuse every draft — there is no answer to persist.
     if not response.message.output:
         raise HTTPException(
             status_code=502,
             detail="The output guardrail rejected every draft. Please rephrase.",
         )
 
-    # 4. Persist the turn so the next request (on any worker) can replay it.
+    # 5. Persist the turn so the next request (on any worker) can replay it.
     db.session.update_one(
         {"_id": response.id_session},
         {
@@ -537,6 +650,7 @@ def chat(body: ChatRequest):
 class InventoryRequest(BaseModel):
     inventory_markdown: str
     id_external_inventory: int
+    request_id: str
     previous_report: str | None = None
 
 
@@ -547,14 +661,24 @@ def inventory(body: InventoryRequest):
     if body.previous_report:
         analyzer.set_context(body.previous_report)
 
-    plan = analyzer.analyze(
-        body.inventory_markdown, id_external_inventory=body.id_external_inventory
-    )
+    try:
+        analysis = analyzer.analyze(
+            body.inventory_markdown,
+            id_external_inventory=body.id_external_inventory,
+            id_request=body.request_id,
+        )
+    except AekoError as exc:
+        # A failed analysis has no response to carry its metrics — the exception does.
+        if exc.aeko_metrics:
+            db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    db.aeko_metrics.insert_one(analysis.aeko_metrics.model_dump())
 
     # `exclude={"id"}`: the plan is new, so let MongoDB generate its `_id`.
-    db.improvement_plan.insert_one(plan.model_dump(by_alias=True, exclude={"id"}))
+    db.improvement_plan.insert_one(analysis.plan.model_dump(by_alias=True, exclude={"id"}))
 
-    return plan.model_dump(exclude={"id"})
+    return analysis.plan.model_dump(exclude={"id"})
 ```
 
 Notes for production:
@@ -569,7 +693,7 @@ Notes for production:
 - Configuration and registered tools are shared mutable process state, so treat startup as
   the only place that writes them.
 
-### 6. Error handling
+### 7. Error handling
 
 Every error the SDK raises inherits from `AekoError`, so one `except` covers the SDK:
 
@@ -580,18 +704,57 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | `MalformedAgentOutputError` | An agent's answer did not match the shape its prompt demands — today, the improvement plan's three headings — and did not recover after four rewrites. | `502` — retry the analysis rather than persisting a guess. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
 
+Every `AekoError` raised *inside* a request carries that request's
+[event tracking](#5-event-tracking) on `.aeko_metrics`, so a run that failed can still be
+persisted. It is `None` for errors raised outside one — `AekoNotConfiguredError` from a
+refused `Aeko.config()`, or `UnknownAgentError` from `set_tools()`.
+
 ```python
 from aeko import AekoError
 
 try:
-    response = messenger.send_message(text, session)
+    response = messenger.send_message(text, session, id_request=request_id)
 except AekoError as exc:
     logger.exception("Aeko failed")
+    if exc.aeko_metrics:
+        db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
     raise HTTPException(status_code=500, detail=str(exc)) from exc
 ```
 
-Remember that a *rejected* answer is not an exception — it is a successful run with an
-empty `message.output` and `approved=False`.
+Remember that a *rejected* answer is not an exception — it is a run that returns
+normally with an empty `message.output` and `approved=False`. Its event tracking still
+records it as a failure, in `error_description`, which is the only place that outcome is
+written down.
+
+---
+
+## Migrating from 2.x
+
+Two signatures changed, and nothing else. There is no shim: a 2.x call fails immediately
+with a `TypeError`, which is the point — an event tracking nobody can correlate is not
+worth producing.
+
+```python
+# 2.x
+reply = messenger.send_message(text, session)
+plan = analyzer.analyze(markdown, id_external_inventory=502)
+
+# 3.0
+reply = messenger.send_message(text, session, id_request=request_id)
+plan = analyzer.analyze(
+    markdown, id_external_inventory=502, id_request=request_id
+).plan
+```
+
+| What | Change |
+| --- | --- |
+| `send_message()` | Add `id_request=` — required, keyword-only. Returns the same `AekoMessageResponse`, now with an `aeko_metrics` field. |
+| `analyze()` | Add `id_request=`. **Returns `AekoAnalysisResponse`, not `AekoImprovementPlan`** — read the plan off `.plan`. |
+| `AekoMessageResponse(...)` built by hand | `aeko_metrics` is a required field. |
+| Nothing else | The DTOs, the agent names, the tools, the graph and the logs are untouched. |
+
+If you build an `AekoMessageResponse` yourself (tests, fixtures), the smallest valid
+tracking is `AekoMetrics(id_request="...", flow="conversational")`.
 
 ---
 
@@ -667,7 +830,7 @@ Everything below is importable directly from `aeko`.
 | --- | --- |
 | `set_tools` *(classmethod)* | `set_tools(tools: dict[str, list[AekoTool \| Any]]) -> None` |
 | *constructor* | `AekoMessenger(user: AekoUser, memories: Sequence[AekoUserMemory] \| None = None)` |
-| `send_message` | `send_message(message: str, session: AekoSession) -> AekoMessageResponse` |
+| `send_message` | `send_message(message: str, session: AekoSession, *, id_request: str) -> AekoMessageResponse` |
 
 **`AekoInventoryAnalyzer`** — report entry point.
 
@@ -675,7 +838,7 @@ Everything below is importable directly from `aeko`.
 | --- | --- |
 | *constructor* | `AekoInventoryAnalyzer()` |
 | `set_context` | `set_context(context: str) -> None` |
-| `analyze` | `analyze(inventory: str, *, id_external_inventory: int) -> AekoImprovementPlan` |
+| `analyze` | `analyze(inventory: str, *, id_external_inventory: int, id_request: str) -> AekoAnalysisResponse` |
 
 **Data objects.** Every DTO that crosses the API boundary is a Pydantic model mirroring one
 MongoDB collection, field for field:
@@ -690,8 +853,12 @@ MongoDB collection, field for field:
 
 `model_validate(document)` takes a raw document and `model_dump(by_alias=True)` gives one
 back — `_id` included, under that exact name — so the hand-off is lossless in both
-directions. `AekoMessageResponse` (the run's answer plus its metadata) and `AekoTool` are
-SDK-only and mirror nothing.
+directions.
+
+`AekoMessageResponse` (the turn plus the run's metadata), `AekoAnalysisResponse` (the plan
+plus the run's metadata), `AekoMetrics`, `AekoAgentMetrics` and `AekoTool` are SDK-only and
+mirror no collection. The two `*Metrics` models are plain Pydantic models — persist them
+wherever your telemetry lives; the SDK has no opinion on the collection's name.
 
 The identifiers (`_id`, `id_external_user`, `id_user`, `id_external_inventory`) and
 `expires_at` are carried across the boundary in both directions and echoed back on
@@ -721,7 +888,8 @@ session.model_dump(by_alias=True, exclude_none=True)
 ```
 
 **Exceptions**: `AekoError`, `AekoNotConfiguredError`, `MalformedAgentOutputError`,
-`UnknownAgentError`.
+`UnknownAgentError`. Every one raised inside a request carries that request's
+`.aeko_metrics`.
 **Constants**: `AGENT_NAMES`, `__version__`.
 
 **Defaults and limits**
@@ -782,15 +950,34 @@ memorias = [AekoUserMemory.model_validate(documento)
             for documento in db.user_memory.find({"id_user": id_usuario})]
 
 messenger = AekoMessenger(usuario, memorias)
-resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?", sessao)
+resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?", sessao,
+                                  id_request="req-8a31")
 print(resposta.message.output)
 db.session.update_one({"_id": id_sessao},
                       {"$push": {"messages": resposta.message.model_dump()}})
+db.aeko_metrics.insert_one(resposta.aeko_metrics.model_dump())
 
 analisador = AekoInventoryAnalyzer()
-plano = analisador.analyze(inventario_em_markdown, id_external_inventory=502)
-db.improvement_plan.insert_one(plano.model_dump(by_alias=True, exclude={"id"}))
+analise = analisador.analyze(inventario_em_markdown, id_external_inventory=502,
+                             id_request="req-8a32")
+db.improvement_plan.insert_one(analise.plan.model_dump(by_alias=True, exclude={"id"}))
+db.aeko_metrics.insert_one(analise.aeko_metrics.model_dump())
 ```
+
+### O que mudou na 3.0
+
+A 3.0 faz o SDK **relatar o que cada requisição custou**. Os dois métodos passaram a exigir
+um `id_request` (obrigatório e keyword-only) e devolvem um `AekoMetrics` junto da resposta:
+latência em milissegundos, descrição do erro quando houve, o fluxo (`conversational` ou
+`analytical`) e uma entrada por **chamada** de agente, com tokens de entrada e saída,
+modelo usado e as tools que aquele agente realmente chamou.
+
+Duas mudanças quebram compatibilidade: a assinatura dos dois métodos, e `analyze()`, que
+agora devolve `AekoAnalysisResponse` (`.plan` + `.aeko_metrics`) em vez de
+`AekoImprovementPlan`. Quando o run falha e levanta exceção, as métricas vão anexadas nela
+(`exc.aeko_metrics`), porque uma requisição que falhou é justamente a que mais interessa
+persistir. Os logs continuam iguais — isto acrescenta uma segunda leitura do que o run já
+observava, não substitui o stream que você lê no terminal.
 
 ### O que mudou na 2.0
 
@@ -800,7 +987,7 @@ compatibilidade**: `SessionInfo` e `InventoryAnalysisResponse` saíram, `prepare
 `AekoMessageResponse`, e `analyze()` devolve `AekoImprovementPlan`. O mapa completo de
 nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
 
-### Quatro pontos que definem a integração
+### Cinco pontos que definem a integração
 
 1. **Configure no startup, nunca por requisição.** `Aeko.config()` e
    `AekoMessenger.set_tools()` alteram um runtime único do processo e reconstroem todos os
@@ -817,7 +1004,10 @@ nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
    memórias do usuário vão no construtor (`AekoMessenger(user, memories)`) e são
    renderizadas **todas**, sem corte, no contexto que todo agente lê — filtrar as
    expiradas é com a API.
-4. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
+4. **Toda resposta carrega métricas.** `resposta.aeko_metrics` e
+   `analise.aeko_metrics` trazem latência, erro, fluxo e o custo por chamada de agente —
+   persista onde sua telemetria vive. Numa exceção, as métricas vêm em `exc.aeko_metrics`.
+5. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
    tentativas (limite de 3 devoluções), o run termina com `message.output == ""` e
    `approved is False` — verifique sempre antes de persistir. Já um plano de melhoria fora
    do formato levanta `MalformedAgentOutputError` — depois de o Coordenador ser convidado a

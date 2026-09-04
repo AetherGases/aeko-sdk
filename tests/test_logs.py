@@ -52,6 +52,10 @@ USER_ID = "64b8f0a1c9e1a2b3c4d5e6f1"
 SESSION_ID = "64b8f0a1c9e1a2b3c4d5e6f3"
 INVENTORY_ID = 502
 
+# What the API correlates one request by, and the only thing it has to supply
+# that the SDK cannot derive for itself.
+REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
+
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
 
 QUESTION = "O que e hidrogenio verde?"
@@ -405,7 +409,7 @@ def test_a_record_is_written_as_prefix_module_datetime_and_description(logs):
 
 
 def test_a_record_has_exactly_three_brackets(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     # Every header, request records included: there is no run id, and nothing
     # else has been added behind the timestamp either.
@@ -448,13 +452,15 @@ def test_a_record_with_nothing_to_list_is_a_single_line(logs):
 
 
 def test_a_chat_request_writes_exactly_one_record(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert logs.one("messenger")
 
 
 def test_a_report_request_writes_exactly_one_record(logs, report):
-    report(INVENTORY_FLOW).analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    report(INVENTORY_FLOW).analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert logs.one("inventory")
 
@@ -470,7 +476,7 @@ def test_nothing_is_written_while_the_request_is_still_running(logs):
 
 
 def test_the_agents_a_request_called_write_nothing_of_their_own(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     # The agents are an item of the request's record, never records of theirs.
     assert logs.of("agents") == []
@@ -486,7 +492,7 @@ def test_an_agent_called_outside_any_request_is_dropped(logs):
 
 
 def test_a_chat_request_lists_its_identifiers(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     record = logs.one("messenger")
 
@@ -496,19 +502,19 @@ def test_a_chat_request_lists_its_identifiers(logs, chat):
 
 
 def test_a_chat_request_never_logs_the_message_itself(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert QUESTION not in logs.text
 
 
 def test_a_chat_request_lists_its_agents_in_call_order(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert logs.one("messenger").agents == ["Roteador", "FAQ"]
 
 
 def test_each_listed_agent_carries_how_long_it_took(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     millis = logs.one("messenger").agent_millis
 
@@ -517,13 +523,15 @@ def test_each_listed_agent_carries_how_long_it_took(logs, chat):
 
 
 def test_the_agents_are_listed_last(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert list(logs.one("messenger").items)[-1] == "agents"
 
 
 def test_an_agent_called_more_than_once_is_listed_once_per_call(logs, chat):
-    chat(REJECTED_FLOW).send_message("Compare os escopos.", make_session())
+    chat(REJECTED_FLOW).send_message(
+        "Compare os escopos.", make_session(), id_request=REQUEST_ID
+    )
 
     agents = logs.one("messenger").agents
 
@@ -534,7 +542,9 @@ def test_an_agent_called_more_than_once_is_listed_once_per_call(logs, chat):
 
 
 def test_a_report_request_lists_its_inventory_and_input(logs, report):
-    report(INVENTORY_FLOW).analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    report(INVENTORY_FLOW).analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     record = logs.one("inventory")
 
@@ -547,13 +557,15 @@ def test_a_report_request_lists_its_inventory_and_input(logs, report):
 
 
 def test_a_conversational_request_is_light_blue(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert logs.one("messenger").color == LIGHT_BLUE
 
 
 def test_a_report_request_is_dark_blue(logs, report):
-    report(INVENTORY_FLOW).analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    report(INVENTORY_FLOW).analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     assert logs.one("inventory").color == BLUE
 
@@ -563,7 +575,7 @@ def test_the_two_flows_are_written_in_different_blues():
 
 
 def test_a_whole_record_is_written_in_one_color(logs, chat):
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     block = logs.text.split(logs.one("messenger").header)[1]
 
@@ -598,7 +610,7 @@ def test_colors_are_left_out_when_the_handler_is_told_to(logs, chat):
     stream = io.StringIO()
     configure_logging(stream=stream, colors=False)
 
-    chat(CHAT_FLOW).send_message(QUESTION, make_session())
+    chat(CHAT_FLOW).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
 
     assert ESCAPE not in stream.getvalue()
     assert stream.getvalue().startswith("[aeko-sdk] [config] [")
@@ -629,7 +641,9 @@ def test_an_exception_is_reported_in_red_and_re_raised_untouched(logs):
 
 
 def test_a_request_marked_as_failed_is_red_even_without_an_exception(logs, chat):
-    chat(REJECTED_FLOW).send_message("Compare os escopos.", make_session())
+    chat(REJECTED_FLOW).send_message(
+        "Compare os escopos.", make_session(), id_request=REQUEST_ID
+    )
 
     record = logs.one("messenger")
 
@@ -640,7 +654,8 @@ def test_a_request_marked_as_failed_is_red_even_without_an_exception(logs, chat)
 def test_a_failed_request_still_lists_what_it_went_through(logs, report):
     with pytest.raises(MalformedAgentOutputError):
         report(MALFORMED_INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
         )
 
     record = logs.one("inventory")
@@ -770,8 +785,10 @@ def test_the_two_flows_are_distinguishable_in_one_stream(logs, use_fake_llm):
     use_fake_llm({**CHAT_FLOW, **INVENTORY_FLOW})
     Aeko.config(API_KEY)
 
-    AekoMessenger(make_user()).send_message(QUESTION, make_session())
-    AekoInventoryAnalyzer().analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
+    AekoMessenger(make_user()).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
+    AekoInventoryAnalyzer().analyze(
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+    )
 
     conversational = logs.one("messenger")
     report_record = logs.one("inventory")
