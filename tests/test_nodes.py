@@ -221,7 +221,9 @@ def test_the_coordinator_answers_once_when_nothing_validates_it(use_agents):
     agent = _ScriptedAgent("Plano finalizado.\nNext agent: Nenhum")
     use_agents({COORDINATOR: agent})
 
-    result = nodes._coordenador_melhoria_node(_state_with())
+    result = nodes._coordenador_melhoria_node(
+        _state_with(), _config(entry_point=nodes.INVENTORY_ENTRY_POINT)
+    )
 
     assert len(agent.inputs) == 1
     assert result["messages"] == [{
@@ -238,7 +240,11 @@ def test_an_ill_formed_answer_is_sent_back_to_the_coordinator(use_agents):
     use_agents({COORDINATOR: agent})
 
     result = nodes._coordenador_melhoria_node(
-        _state_with(), _config(validate_answer=_rejects(["Falta a seção X."]))
+        _state_with(),
+        _config(
+            entry_point=nodes.INVENTORY_ENTRY_POINT,
+            validate_answer=_rejects(["Falta a seção X."]),
+        ),
     )
 
     assert len(agent.inputs) == 2, "o no deve pedir a correcao ao proprio coordenador"
@@ -264,7 +270,11 @@ def test_the_coordinator_gives_up_after_the_retry_cap(use_agents):
     use_agents({COORDINATOR: agent})
 
     result = nodes._coordenador_melhoria_node(
-        _state_with(), _config(validate_answer=_rejects(["Falta tudo."]))
+        _state_with(),
+        _config(
+            entry_point=nodes.INVENTORY_ENTRY_POINT,
+            validate_answer=_rejects(["Falta tudo."]),
+        ),
     )
 
     assert len(agent.inputs) == nodes.PLAN_FORMAT_MAX_RETRIES + 1
@@ -280,6 +290,26 @@ def test_a_run_without_a_validator_never_retries(use_agents):
     nodes._coordenador_melhoria_node(_state_with(), _config(max_tokens=None))
 
     assert len(agent.inputs) == 1, "o fluxo de chat tambem passa por aqui"
+
+
+def test_the_coordinator_does_not_deliver_its_own_answer_in_the_chat_flow(use_agents):
+    """
+    In a chat the plan is a finding for the Orquestrador, not the answer.
+
+    Writing it to "messages" here would deliver the coordinator's fixed
+    sections to the user as they are, and would do it without either reviewer
+    ever seeing them.
+    """
+
+    agent = _ScriptedAgent("## Problema definido\nForno ineficiente.\nNext agent: Nenhum")
+    use_agents({COORDINATOR: agent})
+
+    result = nodes._coordenador_melhoria_node(_state_with())
+
+    assert "messages" not in result
+    assert result["previous_agents"] == {
+        COORDINATOR: "## Problema definido\nForno ineficiente.\nNext agent: Nenhum"
+    }
 
 
 # --- _specialist_node_factory ---------------------------------------------

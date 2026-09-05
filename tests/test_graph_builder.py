@@ -240,13 +240,55 @@ def test_the_report_flow_never_reaches_the_response_checker():
 
     graph = builder.build_graph()
 
-    reachable = {target for _, target in graph._all_edges}
-    for branches in graph.branches.values():
-        for branch in branches.values():
-            reachable.update(branch.ends or {})
-
     assert (builder.IMPROVEMENT_COORDINATOR, builder.RESPONSE_CHECKER) not in graph._all_edges
-    assert builder.IMPROVEMENT_COORDINATOR not in graph.branches
+
+    ends = set()
+    for branch in graph.branches[builder.IMPROVEMENT_COORDINATOR].values():
+        ends.update(branch.ends or {})
+
+    assert builder.RESPONSE_CHECKER not in ends
+
+
+# --- _route_from_coordinator -------------------------------------------------
+
+
+def test_route_from_coordinator_ends_the_report_flow():
+    """
+    The coordinator is terminal for `analyze()`, and only for it.
+
+    Its answer is read straight out of the run's last message and parsed into
+    an `AekoImprovementPlan`, so anything appended after it would be parsed in
+    its place.
+    """
+
+    route = builder._route_from_coordinator
+
+    assert route(_state(), _config(builder.INVENTORY_ENTRY_POINT)) == END
+
+
+@pytest.mark.parametrize("entry_point", [None, "Roteador"])
+def test_route_from_coordinator_hands_the_chat_flow_to_the_orchestrator(entry_point):
+    """
+    In a chat the plan is a finding, not the answer.
+
+    Delivered as it comes, it reaches the user as a document in the
+    coordinator's fixed sections — and does it without passing either reviewer,
+    since this node used to end the run.
+    """
+
+    route = builder._route_from_coordinator
+
+    assert route(_state(), _config(entry_point)) == "Orquestrador"
+
+
+def test_the_coordinator_edge_carries_both_targets():
+    graph = builder.build_graph()
+
+    ends = set()
+    for branch in graph.branches[builder.IMPROVEMENT_COORDINATOR].values():
+        ends.update(branch.ends or {})
+
+    assert ends == {"Orquestrador", END}
 
 
 def test_orquestrador_only_goes_to_guardrail():

@@ -132,7 +132,7 @@ exactly as written, accents included.
 | `Análista de inventários` | Reads the GHG inventory itself. | slow |
 | `Analista de Poluentes` | Pollutant analysis. | slow |
 | `Analista de Gases Verdes` | Green gas alternatives. | slow |
-| `Coordenador de Melhoria Contínua` | Writes the improvement plan. | slow |
+| `Coordenador de Melhoria Contínua` | Writes the improvement plan. Terminal in the report flow; a finding for the orchestrator in a chat. | slow |
 
 The five cheap agents (classify, consolidate, review) run on `fast_model`; the four
 specialist analysts run on `slow_model`. Both are configurable, and each model is
@@ -155,13 +155,19 @@ send_message()
       ├──▶ Analista de Poluentes ─────┐
       ├──▶ Analista de Gases Verdes ──┼──▶ Orquestrador ──▶ Guardrail de Saída
       │                               │                            │
-      └──▶ Coordenador de Melhoria ───┴──▶ answer    approved? ──▶ Verificador de Resposta
+      └──▶ Coordenador de Melhoria ───┘               approved? ──▶ Verificador de Resposta
                                                           │                     │
                                                    rejected (2x)          approved? ──▶ answer
                                                           │                     │
                                                           ▼              rejected (2x)
                                                       Roteador ◀─────────────────┘
 ```
+
+Only the FAQ answers the user directly. Every other agent of this flow — the coordinator
+of improvement plans included — produces a **finding**, which the Orquestrador turns into
+the answer. That is why the plan's `## Problema definido` / `## Método` / `## Raciocínio`
+headings never reach a chat: they are the shape of a document the report flow persists,
+not of a reply.
 
 The two reviewers ask different questions of the same draft. The **guardrail** asks
 whether every number and recommendation is grounded in the analyses that produced it, and

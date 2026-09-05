@@ -1051,6 +1051,7 @@ def test_a_well_formed_plan_is_never_retried(configured, use_fake_llm):
 
 def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
     llm = use_fake_llm({
+        **ANALYSIS_FLOW,
         "Roteador": "Plano de melhoria.\nNext agent: Coordenador de Melhoria Contínua",
         "Coordenador de Melhoria Contínua": "Plano em prosa, sem secoes.\nNext agent: Nenhum",
     })
@@ -1060,7 +1061,9 @@ def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
     )
 
     assert _coordinator_calls(llm) == 1, "so o fluxo de inventario valida o formato"
-    assert response.message.output == "Plano em prosa, sem secoes."
+    assert response.message.output == CONSOLIDATED, (
+        "no chat o plano e insumo do Orquestrador, nao a resposta entregue"
+    )
 
 
 def test_analyze_enters_through_the_inventory_analyst(configured, use_fake_llm):

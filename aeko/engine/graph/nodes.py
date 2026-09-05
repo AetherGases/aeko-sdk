@@ -20,6 +20,12 @@ PLAN_FORMAT_MAX_RETRIES = 4
 # aeko/engine/graph/builder.py, which owns the edges it sits on).
 RESPONSE_CHECKER = "Verificador de Resposta"
 
+# The entry point `AekoInventoryAnalyzer` starts a run at, which is also how a
+# node tells the two flows apart. It lives here, rather than in builder.py with
+# the rest of the routing, because that module imports this one — and the
+# coordinator's node has to know which flow it is answering in.
+INVENTORY_ENTRY_POINT = "Análista de inventários"
+
 
 def _max_tokens_from(config: RunnableConfig | None) -> int:
     """
@@ -482,6 +488,20 @@ def _verificador_resposta_node(state: AetherGraphState, config: RunnableConfig |
     return update
 
 
+def _is_report_flow(config: RunnableConfig | None) -> bool:
+    """
+    Say whether a run entered through the report flow's entry point.
+
+    Args:
+        config: The run's configuration, optionally carrying an "entry_point".
+
+    Returns:
+        bool: True for a run started by `AekoInventoryAnalyzer.analyze()`.
+    """
+
+    return (config or {}).get("configurable", {}).get("entry_point") == INVENTORY_ENTRY_POINT
+
+
 def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
     Invoke the continuous improvement coordinator, retrying an ill-formed answer.
@@ -497,6 +517,13 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
     inventory analyst and the pollutant/green gas analysts already ran, their
     findings are in the state, and only the coordinator has to answer again.
 
+    Only the report flow reads this answer as the run's own: there it is the
+    last node, and `analyze()` parses the plan out of the message it writes. In
+    a chat the same plan is a finding for the Orquestrador to consolidate, so
+    nothing is written to "messages" — delivered as it comes, it would reach the
+    user as a document in this agent's fixed sections, and would reach them
+    without either reviewer of the conversational flow ever seeing it.
+
     The last attempt is recorded either way. Nothing is raised here — the graph
     has no opinion on what the text is for; the caller that parses it is the one
     that can tell an exhausted retry from a plan (see
@@ -509,7 +536,8 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
             output and returns what is wrong with it, empty when nothing is.
 
     Returns:
-        dict: The state update, recording the last attempt as the answer.
+        dict: The state update, recording the last attempt, and delivering it
+            only in the report flow.
     """
 
     agent_name = "Coordenador de Melhoria Contínua"
@@ -528,12 +556,16 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
 
         message = _build_format_retry_message(state, output, problems)
 
-    return {
+    update = {
         "previous_agents": {agent_name: output},
         "pending_agents": [{"agent": agent_name, "is_still_pending": False}],
         "next_agent": next_agent,
-        "messages": [{"role": "assistant", "content": output, "name": agent_name}],
     }
+
+    if _is_report_flow(config):
+        update["messages"] = [{"role": "assistant", "content": output, "name": agent_name}]
+
+    return update
 
 
 roteador_node = _roteador_node

@@ -26,7 +26,7 @@ RESPONSE_CHECKER = "Verificador de Resposta"
 # it from the SDK facade without a cycle), moving only between these analysts and
 # ending at this coordinator. Every other agent belongs to the conversational
 # flow, whose reviewers this one is built never to reach.
-INVENTORY_ENTRY_POINT = "Análista de inventários"
+INVENTORY_ENTRY_POINT = nodes.INVENTORY_ENTRY_POINT
 REPORT_FLOW_ANALYSTS = ("Analista de Poluentes", "Analista de Gases Verdes")
 IMPROVEMENT_COORDINATOR = "Coordenador de Melhoria Contínua"
 
@@ -108,6 +108,31 @@ def _route_from_analyst(default: str, *, current: str = ""):
         return target
 
     return route
+
+
+def _route_from_coordinator(state: AetherGraphState, config: RunnableConfig) -> str:
+    """
+    Decide whether the coordinator's plan ends the run or feeds the answer.
+
+    The coordinator is terminal for `analyze()` and only for it: that flow
+    reads the plan straight out of the run's last message. A chat that asked
+    for an improvement got the same plan delivered raw — the agent's fixed
+    document sections, handed over without passing either reviewer, since this
+    node used to end the run there too. In a chat it is a finding like any
+    other now, and the Orquestrador writes the answer.
+
+    Args:
+        state: The current graph state (unused, kept for the router signature).
+        config: The run's configuration, carrying the "entry_point".
+
+    Returns:
+        str: END in the report flow, "Orquestrador" in the conversational one.
+    """
+
+    if config.get("configurable", {}).get("entry_point") == INVENTORY_ENTRY_POINT:
+        return END
+
+    return "Orquestrador"
 
 
 def _route_from_guardrail(state: AetherGraphState) -> str:
@@ -231,7 +256,14 @@ def build_graph() -> StateGraph:
         },
     )
 
-    graph.add_edge("Coordenador de Melhoria Contínua", END)
+    graph.add_conditional_edges(
+        IMPROVEMENT_COORDINATOR,
+        _route_from_coordinator,
+        {
+            "Orquestrador": "Orquestrador",
+            END: END,
+        },
+    )
 
     graph.add_edge("Orquestrador", "Guardrail de Saída")
 

@@ -93,8 +93,8 @@ def run_graph(use_fake_llm):
 def test_graph_invocation_writes_result_to_file(run_graph):
     result, _ = run_graph(FULL_FLOW)
 
-    # Only terminal nodes (FAQ, Coordenador de Melhoria Contínua) and an
-    # approved Guardrail write to "messages" (see nodes.py). If the run ends
+    # Only a terminal node (the FAQ, or the coordinator of the report flow)
+    # and an approved response check write to "messages" (see nodes.py). If the run ends
     # without ever reaching one of those - e.g. the guardrail rejects past the
     # retry cap - "messages" stays empty, and there is no real final answer
     # to report.
@@ -245,6 +245,44 @@ def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
 
 
 INVENTORY_PLAN = "Plano: trocar os queimadores.\nNext agent: Nenhum"
+
+# A chat question the router sends to the coordinator: the plan is a finding
+# for the Orquestrador, never the answer the user reads.
+CHAT_PLAN_FLOW = {
+    "Roteador": "Pedido de otimizacao.\nNext agent: Coordenador de Melhoria Contínua",
+    "Coordenador de Melhoria Contínua": (
+        "## Problema definido\nFornos ineficientes.\n\n## Método\nTrocar os queimadores."
+        "\n\n## Raciocínio\nO gargalo e a queima.\nNext agent: Nenhum"
+    ),
+    "Orquestrador": f"{CONSOLIDATED_ANSWER}\nNext agent: Guardrail de Saída",
+    "Guardrail de Saída": "Aprovado. Resposta fundamentada.\nNext agent: Nenhum",
+    "Verificador de Resposta": "Aprovado. Responde ao que foi pedido.\nNext agent: Nenhum",
+}
+
+
+def test_a_plan_asked_for_in_a_chat_is_consolidated_not_delivered_raw(run_graph):
+    result, llm = run_graph(CHAT_PLAN_FLOW)
+
+    assert llm.agents_called() == [
+        "Roteador",
+        "Coordenador de Melhoria Contínua",
+        "Orquestrador",
+        "Guardrail de Saída",
+        "Verificador de Resposta",
+    ]
+    assert _final_content(result).startswith(CONSOLIDATED_ANSWER)
+    assert "## Problema definido" not in _final_content(result), (
+        "as secoes sao o formato do documento do Coordenador, nao de uma resposta de chat"
+    )
+
+
+def test_the_plan_reaches_the_orchestrator_as_a_finding(run_graph):
+    _, llm = run_graph(CHAT_PLAN_FLOW)
+
+    prompt = llm.prompt_for("Orquestrador")
+
+    assert "Análises recebidas até agora" in prompt
+    assert "Trocar os queimadores." in prompt
 
 
 @pytest.mark.parametrize(
