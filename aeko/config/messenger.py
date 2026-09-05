@@ -10,7 +10,7 @@ from aeko.config.dto import (
     AekoUser,
     AekoUserMemory,
 )
-from aeko.config.exceptions import UnknownAgentError
+from aeko.config.exceptions import MalformedAgentOutputError, UnknownAgentError
 from aeko.engine.graph.builder import get_app
 from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import AGENT_NAMES
@@ -26,9 +26,10 @@ def _final_answer(result: dict) -> str:
     Extract the user-facing answer a run produced, if it produced one.
 
     A run's "messages" starts empty and only a terminal node or an approved
-    guardrail ever writes to it (see aeko/engine/graph/nodes.py), so a run that
-    ends without reaching any of them — the guardrail rejecting past its retry
-    cap — leaves it empty, and has no answer to report.
+    response check ever writes to it (see aeko/engine/graph/nodes.py), so a run
+    that ends without reaching any of them — either reviewer of the
+    conversational flow rejecting up to its retry cap — leaves it empty, and has
+    no answer to report.
 
     Args:
         result: The graph's final state.
@@ -257,9 +258,9 @@ class AekoMessenger:
         turns are read back into the run; the session keeps every turn it
         arrived with.
 
-        Only a final result is recorded. A turn the guardrail never approved
-        produces no answer and is left out of the session, so a rejected draft
-        cannot become context for the next question.
+        Only a final result is recorded. A turn no reviewer ever approved
+        produces no answer and raises instead of being appended, so a rejected
+        draft cannot become context for the next question.
 
         Args:
             message: The user's message.
@@ -276,6 +277,8 @@ class AekoMessenger:
 
         Raises:
             AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
+            MalformedAgentOutputError: If neither the output guardrail nor the
+                response checker approved an answer within their retry caps.
         """
 
         state = create_initial_state(
@@ -304,20 +307,24 @@ class AekoMessenger:
 
             answer = _final_answer(result)
 
+            # A run that reached neither reviewer's approval has nothing to
+            # hand over, and raising is what says so: the alternative was an
+            # answer-shaped return the caller had to notice was empty. Raised
+            # inside the request so its event tracking travels on the exception
+            # (see `AekoError.aeko_metrics`), which is the only place this
+            # failure is ever recorded.
+            if not answer:
+                raise MalformedAgentOutputError(
+                    "no answer approved by the output guardrail or the response checker"
+                )
+
             # What the turn cost is not recorded on the turn: it is reported
             # per agent invocation on this request's event tracking, which the
             # graph collects on its own (see `agent_call`).
             turn = AekoMessage(input=message, output=answer)
 
-            if answer:
-                session.messages.append(turn)
-                session.updated_at = turn.submitted_at
-
-            # A turn that produced no answer returns normally but delivers
-            # nothing to the user, and is reported as the failure it is (see
-            # `_final_answer` for how a run ends up with one).
-            if not answer:
-                run.fail("no answer approved by the output guardrail")
+            session.messages.append(turn)
+            session.updated_at = turn.submitted_at
 
             agents_called = _agents_called(result)
             approved = bool(result.get("guard_rail_approved"))

@@ -6,13 +6,26 @@ from typing import Any
 from aeko.engine.graph import nodes
 from aeko.engine.graph.state import AetherGraphState
 
-GUARD_RAIL_MAX_RETRIES = 3
+# How many rejections each reviewer of the conversational flow is allowed
+# before the run gives up: the first sends the answer back to the router to be
+# rewritten, the second ends the run with nothing to deliver. A turn that has
+# been refused twice is not one more rewrite away from being right, and every
+# retry re-runs the whole flow behind it.
+GUARD_RAIL_MAX_RETRIES = 2
+RESPONSE_CHECK_MAX_RETRIES = 2
+
+# The last agent of the conversational flow: it reviews what the guardrail
+# approved, comparing what was asked with what was generated, and it is the
+# only agent of that flow whose approval delivers an answer. The report flow
+# never reaches it — its answer is a document, parsed by whoever called
+# `analyze()`, not a message to a user.
+RESPONSE_CHECKER = "Verificador de Resposta"
 
 # The report flow, as the graph knows it: entered here by `AekoInventoryAnalyzer`
 # (which owns the same name as `INVENTORY_ENTRY_POINT` — the engine cannot import
 # it from the SDK facade without a cycle), moving only between these analysts and
 # ending at this coordinator. Every other agent belongs to the conversational
-# flow, which ends at the guardrail this one is built never to reach.
+# flow, whose reviewers this one is built never to reach.
 INVENTORY_ENTRY_POINT = "Análista de inventários"
 REPORT_FLOW_ANALYSTS = ("Analista de Poluentes", "Analista de Gases Verdes")
 IMPROVEMENT_COORDINATOR = "Coordenador de Melhoria Contínua"
@@ -99,16 +112,47 @@ def _route_from_analyst(default: str, *, current: str = ""):
 
 def _route_from_guardrail(state: AetherGraphState) -> str:
     """
-    Decide whether the guardrail's verdict ends the run or sends it back for retry.
+    Decide whether the guardrail's verdict moves on, retries or ends the run.
+
+    An approved draft has only cleared the first of the two reviews a chat
+    answer goes through, so it moves on to the response checker instead of
+    being delivered.
 
     Args:
         state: The current graph state, carrying the guardrail's verdict.
 
     Returns:
-        str: END when approved or the retry cap is exceeded, otherwise "Roteador".
+        str: The response checker when approved, END once the rejections reach
+            the cap, otherwise "Roteador".
     """
 
-    if state["guard_rail_approved"] or state["guard_rail_retries"] > GUARD_RAIL_MAX_RETRIES:
+    if state["guard_rail_approved"]:
+        return RESPONSE_CHECKER
+
+    if state["guard_rail_retries"] >= GUARD_RAIL_MAX_RETRIES:
+        return END
+
+    return "Roteador"
+
+
+def _route_from_response_check(state: AetherGraphState) -> str:
+    """
+    Decide whether the response checker's verdict ends the run or retries it.
+
+    Either way this is where the conversational flow ends: an approved answer
+    has already been written to "messages" by the node itself, and a rejected
+    one that has used up its retries leaves the run with nothing to deliver —
+    which the facade turns into the failure it is (see `AekoMessenger`).
+
+    Args:
+        state: The current graph state, carrying the checker's verdict.
+
+    Returns:
+        str: END when approved or once the rejections reach the cap, otherwise
+            "Roteador".
+    """
+
+    if state["response_check_approved"] or state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES:
         return END
 
     return "Roteador"
@@ -128,6 +172,7 @@ def build_graph() -> StateGraph:
     graph.add_node("FAQ", nodes.faq_node)
     graph.add_node("Orquestrador", nodes.orquestrador_node)
     graph.add_node("Guardrail de Saída", nodes.guardrail_node)
+    graph.add_node(RESPONSE_CHECKER, nodes.verificador_resposta_node)
     graph.add_node("Análista de inventários", nodes.analista_inventarios_node)
     graph.add_node("Analista de Poluentes", nodes.analista_poluentes_node)
     graph.add_node("Analista de Gases Verdes", nodes.analista_gases_verdes_node)
@@ -193,6 +238,16 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges(
         "Guardrail de Saída",
         _route_from_guardrail,
+        {
+            "Roteador": "Roteador",
+            RESPONSE_CHECKER: RESPONSE_CHECKER,
+            END: END,
+        },
+    )
+
+    graph.add_conditional_edges(
+        RESPONSE_CHECKER,
+        _route_from_response_check,
         {
             "Roteador": "Roteador",
             END: END,

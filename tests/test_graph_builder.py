@@ -8,9 +8,13 @@ def _state(**overrides):
     base = {
         "messages": [],
         "next_agent": None,
+        "output": "",
         "guard_rail_retries": 0,
         "guard_rail_requested_changes": [],
         "guard_rail_approved": False,
+        "response_check_retries": 0,
+        "response_check_requested_changes": [],
+        "response_check_approved": False,
     }
     base.update(overrides)
     return base
@@ -73,7 +77,8 @@ def test_route_from_analyst_default_target_also_gets_overridden():
 
 
 @pytest.mark.parametrize(
-    "conversational", ["Orquestrador", "Roteador", "FAQ", "Guardrail de Saída"]
+    "conversational",
+    ["Orquestrador", "Roteador", "FAQ", "Guardrail de Saída", "Verificador de Resposta"],
 )
 def test_no_conversational_agent_is_reachable_from_the_report_flow(conversational):
     """
@@ -142,25 +147,106 @@ def test_the_inventory_analyst_edge_accepts_the_coordinator():
     )
 
 
-def test_route_from_guardrail_approved_ends_the_graph():
+def test_route_from_guardrail_approved_goes_to_the_response_checker():
+    """
+    The guardrail no longer ends the conversational flow: the checker does.
+
+    An approved draft has only cleared the first of the two reviews a chat
+    answer goes through, so it moves on instead of being delivered.
+    """
+
     state = _state(guard_rail_approved=True)
 
-    assert builder._route_from_guardrail(state) == END
+    assert builder._route_from_guardrail(state) == builder.RESPONSE_CHECKER
 
 
 def test_route_from_guardrail_rejected_goes_back_to_roteador():
-    state = _state(guard_rail_approved=False, guard_rail_retries=0)
+    state = _state(guard_rail_approved=False, guard_rail_retries=1)
 
     assert builder._route_from_guardrail(state) == "Roteador"
 
 
-def test_route_from_guardrail_rejected_past_retry_cap_ends_anyway():
+def test_route_from_guardrail_stops_at_the_second_rejection():
     state = _state(
         guard_rail_approved=False,
-        guard_rail_retries=builder.GUARD_RAIL_MAX_RETRIES + 1,
+        guard_rail_retries=builder.GUARD_RAIL_MAX_RETRIES,
     )
 
     assert builder._route_from_guardrail(state) == END
+
+
+def test_both_reviewers_get_two_rejections_before_the_run_gives_up():
+    assert builder.GUARD_RAIL_MAX_RETRIES == 2
+    assert builder.RESPONSE_CHECK_MAX_RETRIES == 2
+
+
+def test_route_from_response_check_approved_ends_the_graph():
+    state = _state(response_check_approved=True)
+
+    assert builder._route_from_response_check(state) == END
+
+
+def test_route_from_response_check_rejected_goes_back_to_roteador():
+    state = _state(response_check_approved=False, response_check_retries=1)
+
+    assert builder._route_from_response_check(state) == "Roteador"
+
+
+def test_route_from_response_check_stops_at_the_second_rejection():
+    state = _state(
+        response_check_approved=False,
+        response_check_retries=builder.RESPONSE_CHECK_MAX_RETRIES,
+    )
+
+    assert builder._route_from_response_check(state) == END
+
+
+def test_the_response_checker_is_a_node_of_the_graph():
+    graph = builder.build_graph()
+
+    assert builder.RESPONSE_CHECKER in graph.nodes
+
+
+def test_the_guardrail_edge_carries_the_response_checker():
+    graph = builder.build_graph()
+
+    ends = set()
+    for branch in graph.branches["Guardrail de Saída"].values():
+        ends.update(branch.ends or {})
+
+    assert builder.RESPONSE_CHECKER in ends, (
+        "sem isso o desvio existe na funcao de rota mas o alvo nao esta no path map"
+    )
+
+
+def test_the_response_checker_only_ends_or_retries():
+    graph = builder.build_graph()
+
+    ends = set()
+    for branch in graph.branches[builder.RESPONSE_CHECKER].values():
+        ends.update(branch.ends or {})
+
+    assert ends == {"Roteador", END}
+
+
+def test_the_report_flow_never_reaches_the_response_checker():
+    """
+    The checker reviews chat answers, and the report flow has none.
+
+    Its answer is parsed into an `AekoImprovementPlan` by whoever called
+    `analyze()`, so a reviewer sitting between the coordinator and the caller
+    would be judging a document, not a message to a user.
+    """
+
+    graph = builder.build_graph()
+
+    reachable = {target for _, target in graph._all_edges}
+    for branches in graph.branches.values():
+        for branch in branches.values():
+            reachable.update(branch.ends or {})
+
+    assert (builder.IMPROVEMENT_COORDINATOR, builder.RESPONSE_CHECKER) not in graph._all_edges
+    assert builder.IMPROVEMENT_COORDINATOR not in graph.branches
 
 
 def test_orquestrador_only_goes_to_guardrail():

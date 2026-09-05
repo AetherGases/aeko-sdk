@@ -65,6 +65,25 @@ def test_build_context_message_includes_latest_guardrail_feedback():
     ) in message.content
 
 
+def test_build_context_message_includes_latest_response_check_feedback():
+    state = _state_with(
+        response_check_requested_changes=["A resposta cita um numero que ninguem analisou."]
+    )
+
+    message = nodes._build_context_message(state)
+
+    assert (
+        "Pontos apontados pelo Verificador de Resposta na tentativa anterior:\n"
+        "A resposta cita um numero que ninguem analisou."
+    ) in message.content
+
+
+def test_build_context_message_omits_response_check_section_when_no_rejection():
+    message = nodes._build_context_message(_state_with())
+
+    assert "Pontos apontados pelo Verificador de Resposta" not in message.content
+
+
 def test_build_context_message_omits_guardrail_section_when_no_rejection():
     state = _state_with()
 
@@ -93,7 +112,7 @@ def test_build_context_message_replays_the_whole_history_it_was_given():
 
 
 def test_build_guardrail_message_wraps_orquestrador_draft():
-    state = _state_with(previous_agents={"Orquestrador": "Resposta consolidada."})
+    state = _state_with(output="Resposta consolidada.")
 
     message = nodes._build_guardrail_message(state)
 
@@ -116,10 +135,13 @@ def test_build_guardrail_message_handles_missing_draft():
 
 
 def test_build_guardrail_message_includes_specialist_findings():
-    state = _state_with(previous_agents={
-        "Analista de Poluentes": "Emissoes criticas de NOx.",
-        "Orquestrador": "Resposta consolidada.",
-    })
+    state = _state_with(
+        output="Resposta consolidada.",
+        previous_agents={
+            "Analista de Poluentes": "Emissoes criticas de NOx.",
+            "Orquestrador": "Resposta consolidada.",
+        },
+    )
 
     message = nodes._build_guardrail_message(state)
 
@@ -448,6 +470,9 @@ def test_orquestrador_node_records_draft_in_previous_agents_not_messages(use_age
     result = nodes._orquestrador_node(_state_with())
 
     assert result["previous_agents"] == {"Orquestrador": "Resposta consolidada.\nNext agent: Guardrail de Saída"}
+    assert result["output"] == "Resposta consolidada.\nNext agent: Guardrail de Saída", (
+        "o rascunho candidato vive no estado ate o ultimo revisor aprova-lo"
+    )
     assert "messages" not in result
     assert result["next_agent"] == {
         "agent": "Guardrail de Saída",
@@ -470,20 +495,24 @@ def test_orquestrador_node_uses_previous_agents_findings_as_context(use_agents):
 # --- _guardrail_node ---------------------------------------------------------
 
 
-def test_guardrail_node_promotes_orquestrador_draft_on_approval(use_agents):
+def test_guardrail_node_approves_without_delivering_the_draft(use_agents):
+    """
+    Approving is not delivering: the response checker still has to see it.
+
+    Writing to "messages" here would hand the user an answer the checker was
+    about to reject, since the channel is what the facade reads the delivered
+    answer from.
+    """
+
     use_agents({
         "Guardrail de Saída": _FakeAgent("Aprovado. Tudo certo.\nNext agent: Orquestrador"),
         "Orquestrador": _FakeAgent("dummy"),
     })
 
-    state = _state_with(previous_agents={"Orquestrador": "Resposta consolidada para o usuario."})
+    state = _state_with(output="Resposta consolidada para o usuario.")
     result = nodes._guardrail_node(state)
 
-    assert result["messages"] == [{
-        "role": "assistant",
-        "content": "Resposta consolidada para o usuario.",
-        "name": "Orquestrador",
-    }]
+    assert "messages" not in result
     assert result["guard_rail_approved"] is True
     assert "guard_rail_requested_changes" not in result
     assert "guard_rail_retries" not in result
@@ -495,13 +524,114 @@ def test_guardrail_node_does_not_touch_messages_on_rejection(use_agents):
         "Orquestrador": _FakeAgent("dummy"),
     })
 
-    state = _state_with(previous_agents={"Orquestrador": "Resposta consolidada."}, guard_rail_retries=0)
+    state = _state_with(output="Resposta consolidada.", guard_rail_retries=0)
     result = nodes._guardrail_node(state)
 
     assert "messages" not in result
     assert result["guard_rail_approved"] is False
     assert result["guard_rail_requested_changes"] == ["Reprovado. Falta fundamentacao.\nNext agent: Orquestrador"]
     assert result["guard_rail_retries"] == 1
+
+
+# --- _build_response_check_message -------------------------------------------
+
+
+def test_build_response_check_message_pairs_the_question_with_the_answer():
+    state = _state_with(output="Resposta consolidada para o usuario.")
+
+    message = nodes._build_response_check_message(state)
+
+    assert isinstance(message, HumanMessage)
+    assert message.content == (
+        "Pergunta original do usuário: Pergunta de teste"
+        "\n\nResposta gerada: 'Resposta consolidada para o usuario.'"
+    )
+
+
+def test_build_response_check_message_includes_the_findings_behind_the_answer():
+    state = _state_with(
+        output="Resposta consolidada.",
+        previous_agents={
+            "Analista de Poluentes": "Emissoes criticas de NOx.",
+            "Orquestrador": "Resposta consolidada.",
+        },
+    )
+
+    message = nodes._build_response_check_message(state)
+
+    assert "Análises recebidas:" in message.content
+    assert "- Analista de Poluentes: Emissoes criticas de NOx." in message.content
+    assert "- Orquestrador:" not in message.content, (
+        "o rascunho ja esta na mensagem; repeti-lo como analise seria fundamenta-lo em si mesmo"
+    )
+
+
+def test_build_response_check_message_handles_a_missing_answer():
+    message = nodes._build_response_check_message(_state_with())
+
+    assert "Resposta gerada: ''" in message.content
+
+
+# --- _verificador_resposta_node ----------------------------------------------
+
+
+def test_response_check_node_delivers_the_answer_on_approval(use_agents):
+    use_agents({
+        "Verificador de Resposta": _FakeAgent("Aprovado. Fiel ao pedido.\nNext agent: Nenhum"),
+    })
+
+    state = _state_with(output="Resposta consolidada para o usuario.")
+    result = nodes._verificador_resposta_node(state)
+
+    assert result["messages"] == [{
+        "role": "assistant",
+        "content": "Resposta consolidada para o usuario.",
+        "name": "Orquestrador",
+    }]
+    assert result["response_check_approved"] is True
+    assert "response_check_requested_changes" not in result
+    assert "response_check_retries" not in result
+
+
+def test_response_check_node_holds_back_the_answer_on_rejection(use_agents):
+    use_agents({
+        "Roteador": _FakeAgent("dummy"),
+        "Verificador de Resposta": _FakeAgent(
+            "Reprovado. Cita um dado que ninguem analisou.\nNext agent: Roteador"
+        ),
+    })
+
+    state = _state_with(output="Resposta consolidada.", response_check_retries=0)
+    result = nodes._verificador_resposta_node(state)
+
+    assert "messages" not in result
+    assert result["response_check_approved"] is False
+    assert result["response_check_requested_changes"] == [
+        "Reprovado. Cita um dado que ninguem analisou.\nNext agent: Roteador"
+    ]
+    assert result["response_check_retries"] == 1
+
+
+def test_response_check_node_records_itself_among_the_agents(use_agents):
+    use_agents({
+        "Verificador de Resposta": _FakeAgent("Aprovado.\nNext agent: Nenhum"),
+    })
+
+    result = nodes._verificador_resposta_node(_state_with(output="Resposta."))
+
+    assert "Verificador de Resposta" in result["previous_agents"]
+
+
+def test_response_check_node_reviews_what_would_be_delivered(use_agents):
+    fake_agent = _FakeAgent("Aprovado.\nNext agent: Nenhum")
+    use_agents({"Verificador de Resposta": fake_agent})
+
+    nodes._verificador_resposta_node(_state_with(output="Resposta consolidada."))
+
+    sent = fake_agent.last_input["messages"][0]
+
+    assert "Pergunta de teste" in sent.content
+    assert "Resposta consolidada." in sent.content
 
 
 # --- module-level nodes -------------------------------------------------------
@@ -513,6 +643,7 @@ def test_module_level_nodes_are_created_and_callable():
         nodes.faq_node,
         nodes.orquestrador_node,
         nodes.guardrail_node,
+        nodes.verificador_resposta_node,
     ]
     specialist_nodes = [
         nodes.analista_inventarios_node,

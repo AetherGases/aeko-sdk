@@ -23,12 +23,18 @@ class AekoNotConfiguredError(AekoError):
 
 class MalformedAgentOutputError(AekoError):
     """
-    Raised when an agent's answer does not match the shape its prompt demands.
+    Raised when a run produced nothing the SDK is willing to hand over.
 
-    Only raised where the SDK has to turn an answer into a database document —
-    today, the continuous improvement coordinator's `AekoImprovementPlan`. Failing
-    here is deliberate: the alternative is handing the API a plan whose fields
-    were guessed from prose, which it would then persist as if it were real.
+    Two things end here. An answer that does not match the shape its prompt
+    demands, where the SDK has to turn it into a database document — today, the
+    continuous improvement coordinator's `AekoImprovementPlan`. And a
+    conversational turn neither the output guardrail nor the response checker
+    ever approved, which reaches its retry cap with no answer to deliver.
+
+    Failing is deliberate in both cases: the alternatives are handing the API a
+    plan whose fields were guessed from prose, and handing it an empty turn it
+    would have to notice the emptiness of on its own — both persisted as if they
+    were real answers.
     """
 
 

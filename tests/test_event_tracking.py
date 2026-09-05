@@ -64,6 +64,14 @@ REJECTED_FLOW = {
     "Guardrail de Saída": "Reprovado. Sem fundamentacao.\nNext agent: Nenhum",
 }
 
+REVIEWED_FLOW = {
+    "Roteador": "Analise tecnica.\nNext agent: Analista de Poluentes",
+    "Analista de Poluentes": "CO2 critico.\nNext agent: Orquestrador",
+    "Orquestrador": "Panorama consolidado.\nNext agent: Guardrail de Saída",
+    "Guardrail de Saída": "Aprovado.\nNext agent: Nenhum",
+    "Verificador de Resposta": "Aprovado.\nNext agent: Nenhum",
+}
+
 PLAN_FIELDS = {
     "defined_problem": "Os fornos a gas natural concentram a emissao de CO2.",
     "method": "Migrar a carga termica para hidrogenio verde.",
@@ -372,11 +380,12 @@ def test_the_agents_are_listed_in_call_order(chat):
 
 
 def test_an_agent_called_more_than_once_is_listed_once_per_call(chat):
-    response = chat(REJECTED_FLOW).send_message(
-        "Compare os escopos.", make_session(), id_request=REQUEST_ID
-    )
+    with pytest.raises(MalformedAgentOutputError) as raised:
+        chat(REJECTED_FLOW).send_message(
+            "Compare os escopos.", make_session(), id_request=REQUEST_ID
+        )
 
-    called = [agent.name for agent in response.aeko_metrics.used_agents]
+    called = [agent.name for agent in raised.value.aeko_metrics.used_agents]
 
     # The guardrail's retry loop runs the same agents again and again, and the
     # event tracking shows the loop rather than collapsing it into unique names
@@ -482,17 +491,33 @@ def test_a_request_that_went_well_describes_no_error(chat):
     assert response.aeko_metrics.error_description is None
 
 
-def test_a_turn_the_guardrail_never_approved_is_described(chat):
-    # It returns normally and delivers nothing, so the only place this failure
-    # is ever recorded is here.
-    response = chat(REJECTED_FLOW).send_message(
+def test_a_turn_no_reviewer_approved_carries_its_tracking_on_the_exception(chat):
+    # It raises and delivers nothing, so the tracking travels on the exception
+    # for the same reason a failed analysis does: there is no return value left.
+    with pytest.raises(MalformedAgentOutputError) as raised:
+        chat(REJECTED_FLOW).send_message(
+            "Compare os escopos.", make_session(), id_request=REQUEST_ID
+        )
+
+    tracking = raised.value.aeko_metrics
+
+    assert isinstance(tracking, AekoMetrics)
+    assert tracking.id_request == REQUEST_ID
+    assert tracking.flow == "conversational"
+    assert "no answer approved by the output guardrail" in (
+        tracking.error_description or ""
+    )
+
+
+def test_the_response_checker_is_accounted_for_like_any_other_agent(chat):
+    response = chat(REVIEWED_FLOW).send_message(
         "Compare os escopos.", make_session(), id_request=REQUEST_ID
     )
 
-    assert response.message.output == ""
-    assert "no answer approved by the output guardrail" in (
-        response.aeko_metrics.error_description or ""
-    )
+    checker = by_name(response.aeko_metrics)["Verificador de Resposta"]
+
+    assert checker.input_tokens > 0
+    assert checker.output_tokens > 0
 
 
 def test_a_failed_analysis_carries_its_event_tracking_on_the_exception(report):

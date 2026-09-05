@@ -40,12 +40,22 @@ FULL_FLOW = {
     ),
     "Orquestrador": f"{CONSOLIDATED_ANSWER}\nNext agent: Guardrail de Saída",
     "Guardrail de Saída": "Aprovado. Resposta fundamentada.\nNext agent: Nenhum",
+    "Verificador de Resposta": "Aprovado. Responde ao que foi pedido.\nNext agent: Nenhum",
 }
 
 # Same flow, but the guardrail never lets the draft through.
 REJECTING_FLOW = {
     **FULL_FLOW,
     "Guardrail de Saída": "Reprovado. Faltam dados de escopo 3.\nNext agent: Nenhum",
+}
+
+# The draft clears the guardrail and is caught by the response checker instead.
+CHECKER_REJECTING_FLOW = {
+    **FULL_FLOW,
+    "Verificador de Resposta": (
+        "Reprovado. A resposta inventa um dado que ninguem pediu nem analisou."
+        "\nNext agent: Roteador"
+    ),
 }
 
 # The report entry point: inventory analyst -> pollutants -> continuous improvement.
@@ -128,6 +138,7 @@ def test_every_specialist_contributes_before_consolidation(run_graph):
         "Analista de Gases Verdes",
         "Orquestrador",
         "Guardrail de Saída",
+        "Verificador de Resposta",
     ]
     assert "Analista de Poluentes" in result["previous_agents"]
     assert "Analista de Gases Verdes" in result["previous_agents"]
@@ -158,7 +169,7 @@ def test_rejected_answer_never_reaches_the_user(run_graph):
 def test_guardrail_retries_are_capped(run_graph):
     result, _ = run_graph(REJECTING_FLOW)
 
-    assert result["guard_rail_retries"] == 4, "o laco deve parar logo apos exceder o limite"
+    assert result["guard_rail_retries"] == 2, "duas reprovacoes e o run desiste"
     assert result["guard_rail_requested_changes"], "o feedback do guardrail deve ser registrado"
 
 
@@ -166,6 +177,52 @@ def test_guardrail_feedback_is_sent_back_to_the_router(run_graph):
     _, llm = run_graph(REJECTING_FLOW)
 
     assert "Pontos apontados pelo Guardrail de Saída" in llm.prompt_for("Roteador")
+
+
+def test_an_approved_draft_is_only_delivered_after_the_response_checker(run_graph):
+    result, _ = run_graph(FULL_FLOW)
+
+    assert result["response_check_approved"] is True
+    assert _final_content(result).startswith(CONSOLIDATED_ANSWER), (
+        "a resposta entregue segue sendo o rascunho do Orquestrador"
+    )
+
+
+def test_the_guardrail_alone_does_not_deliver_an_answer(run_graph):
+    """
+    The draft is held out of "messages" until the last reviewer approves it.
+
+    The guardrail runs before the checker, so promoting on its approval would
+    hand the user an answer the checker was still about to reject.
+    """
+
+    result, _ = run_graph(CHECKER_REJECTING_FLOW)
+
+    assert result["guard_rail_approved"] is True
+    assert result["response_check_approved"] is False
+    assert not result["messages"], "uma resposta reprovada pelo verificador nao e entregue"
+
+
+def test_response_check_retries_are_capped(run_graph):
+    result, _ = run_graph(CHECKER_REJECTING_FLOW)
+
+    assert result["response_check_retries"] == 2, "duas reprovacoes e o run desiste"
+    assert result["response_check_requested_changes"]
+
+
+def test_response_check_feedback_is_sent_back_to_the_router(run_graph):
+    _, llm = run_graph(CHECKER_REJECTING_FLOW)
+
+    assert "Pontos apontados pelo Verificador de Resposta" in llm.prompt_for("Roteador")
+
+
+def test_the_response_checker_reads_the_question_and_the_answer(run_graph):
+    _, llm = run_graph(FULL_FLOW)
+
+    prompt = llm.prompt_for("Verificador de Resposta")
+
+    assert "gases verdes poderiam substituir" in prompt, "o que foi pedido"
+    assert CONSOLIDATED_ANSWER in prompt, "o que foi gerado"
 
 
 def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
@@ -182,6 +239,9 @@ def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
     ]
     assert _final_content(result).startswith("Plano:")
     assert result["guard_rail_approved"] is False, "este fluxo nao passa pelo guardrail"
+    assert "Verificador de Resposta" not in llm.agents_called(), (
+        "o verificador e do fluxo conversacional"
+    )
 
 
 INVENTORY_PLAN = "Plano: trocar os queimadores.\nNext agent: Nenhum"
