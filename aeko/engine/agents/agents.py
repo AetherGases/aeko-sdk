@@ -14,8 +14,17 @@ from aeko.engine.runtime import RUNTIME
 AGENT_SCRATCHPAD = MessagesPlaceholder(variable_name="agent_scratchpad")
 
 # Agents that only classify, consolidate or review — cheap turns, fast model.
-# Everything else is a specialist analyst and gets the high-effort model.
-FAST_AGENTS = ("Roteador", "FAQ", "Orquestrador", "Guardrail de Saída")
+# Everything else is a specialist analyst and gets the high-effort model. The
+# response checker belongs here for the same reason the guardrail does: it
+# produces no analysis of its own, only a verdict on text it was handed, and it
+# runs on every conversational turn, so its cost is paid by all of them.
+FAST_AGENTS = (
+    "Roteador",
+    "FAQ",
+    "Orquestrador",
+    "Guardrail de Saída",
+    "Verificador de Resposta",
+)
 
 
 def _to_prompt_line(tool: Any) -> str:

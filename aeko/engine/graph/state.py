@@ -68,22 +68,33 @@ class AetherGraphState(MessagesState):
     The state one graph run carries.
 
     "messages" is inherited from MessagesState but is an *output* channel here,
-    not a transcript: it starts empty and only a terminal node or an approved
-    guardrail ever writes to it (see aeko/engine/graph/nodes.py), so "the run
-    produced a user-facing answer" is exactly "messages is not empty". No agent
-    is ever invoked with it — each one gets a single isolated message built by
-    `_build_context_message`, and the prior conversation reaches them through
-    "history" instead, already rendered as the text they read.
+    not a transcript: it starts empty and only a terminal node or the last
+    reviewer of the conversational flow ever writes to it (see
+    aeko/engine/graph/nodes.py), so "the run produced a user-facing answer" is
+    exactly "messages is not empty". No agent is ever invoked with it — each one
+    gets a single isolated message built by `_build_context_message`, and the
+    prior conversation reaches them through "history" instead, already rendered
+    as the text they read.
+
+    "output" is where an answer waits while it is being reviewed. The
+    conversational flow reviews the same draft twice — the guardrail, then the
+    response checker — so an answer written into "messages" by the first of them
+    would already be delivered by the time the second rejected it. The draft
+    lives here until the last reviewer approves it, and only then is promoted.
     """
 
     initial_question: str
     history: str
+    output: str
     previous_agents: Annotated[dict[str, str], _merge_previous_agents]
     next_agent: NextAgent | None
     pending_agents: Annotated[list[PendingAgents], _merge_pending_agents]
     guard_rail_requested_changes: list[str]
     guard_rail_retries: int
     guard_rail_approved: bool
+    response_check_requested_changes: list[str]
+    response_check_retries: int
+    response_check_approved: bool
     company_context: str
 
 
@@ -115,8 +126,12 @@ def create_initial_state(initial_question: str, company_context: str = "",
         previous_agents={},
         next_agent=None,
         pending_agents=[],
+        output="",
         guard_rail_requested_changes=[],
         guard_rail_retries=0,
         guard_rail_approved=False,
+        response_check_requested_changes=[],
+        response_check_retries=0,
+        response_check_approved=False,
         company_context=company_context,
     )

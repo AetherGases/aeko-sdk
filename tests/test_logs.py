@@ -529,9 +529,10 @@ def test_the_agents_are_listed_last(logs, chat):
 
 
 def test_an_agent_called_more_than_once_is_listed_once_per_call(logs, chat):
-    chat(REJECTED_FLOW).send_message(
-        "Compare os escopos.", make_session(), id_request=REQUEST_ID
-    )
+    with pytest.raises(MalformedAgentOutputError):
+        chat(REJECTED_FLOW).send_message(
+            "Compare os escopos.", make_session(), id_request=REQUEST_ID
+        )
 
     agents = logs.one("messenger").agents
 
@@ -640,10 +641,11 @@ def test_an_exception_is_reported_in_red_and_re_raised_untouched(logs):
     assert "ValueError: boom" in record.description
 
 
-def test_a_request_marked_as_failed_is_red_even_without_an_exception(logs, chat):
-    chat(REJECTED_FLOW).send_message(
-        "Compare os escopos.", make_session(), id_request=REQUEST_ID
-    )
+def test_a_turn_no_reviewer_approved_is_reported_in_red(logs, chat):
+    with pytest.raises(MalformedAgentOutputError):
+        chat(REJECTED_FLOW).send_message(
+            "Compare os escopos.", make_session(), id_request=REQUEST_ID
+        )
 
     record = logs.one("messenger")
 

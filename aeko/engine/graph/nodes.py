@@ -15,6 +15,17 @@ from aeko.shared import agent_call
 # `AekoInventoryAnalyzer.analyze`).
 PLAN_FORMAT_MAX_RETRIES = 4
 
+# The last agent of the conversational flow, named here because three of this
+# module's functions have to agree on the name the graph routes it by (see
+# aeko/engine/graph/builder.py, which owns the edges it sits on).
+RESPONSE_CHECKER = "Verificador de Resposta"
+
+# The entry point `AekoInventoryAnalyzer` starts a run at, which is also how a
+# node tells the two flows apart. It lives here, rather than in builder.py with
+# the rest of the routing, because that module imports this one — and the
+# coordinator's node has to know which flow it is answering in.
+INVENTORY_ENTRY_POINT = "Análista de inventários"
+
 
 def _max_tokens_from(config: RunnableConfig | None) -> int:
     """
@@ -57,10 +68,13 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     message from `initial_question` plus a structured summary of
     `previous_agents` avoids both problems.
 
-    Also includes the Guardrail's most recent rejection feedback, if any, so
-    that whoever is invoked next (typically the Roteador, deciding where to
+    Also includes the most recent rejection feedback of each reviewer, if any,
+    so that whoever is invoked next (typically the Roteador, deciding where to
     retry) can tell whether the gap is a missing specialist analysis or just
-    a consolidation/tone fix, instead of guessing blind.
+    a consolidation/tone fix, instead of guessing blind. Both are carried
+    because they are rejections of different things: the guardrail refuses a
+    draft that is unfounded or badly toned, while the response checker refuses
+    one that does not answer what was asked.
 
     Args:
         state: The current graph state.
@@ -68,7 +82,7 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     Returns:
         HumanMessage: The company context and the prior conversation, the
             original question, a summary of any specialist findings gathered so
-            far, and the latest guardrail feedback.
+            far, and the latest feedback from each reviewer.
     """
 
     parts = []
@@ -95,6 +109,12 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
             f"Pontos apontados pelo Guardrail de Saída na tentativa anterior:\n{requested_changes[-1]}"
         )
 
+    checked_changes = state.get("response_check_requested_changes") or []
+    if checked_changes:
+        parts.append(
+            f"Pontos apontados pelo {RESPONSE_CHECKER} na tentativa anterior:\n{checked_changes[-1]}"
+        )
+
     return HumanMessage(content="\n\n".join(parts))
 
 
@@ -110,8 +130,9 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     ("sem lacunas relevantes") — it can only judge tone in a vacuum.
 
     Args:
-        state: The current graph state, whose "previous_agents" holds the
-            Orquestrador's draft answer and the specialists' findings.
+        state: The current graph state, whose "output" holds the Orquestrador's
+            draft answer and whose "previous_agents" holds the specialists'
+            findings.
 
     Returns:
         HumanMessage: The review request wrapping the draft, the original
@@ -119,13 +140,54 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     """
 
     previous = state.get("previous_agents") or {}
-    draft = previous.get("Orquestrador", "")
+    draft = state.get("output") or ""
     parts = [
         f"Revise esta resposta: '{draft}'",
         f"Pergunta original do usuário: {state['initial_question']}",
     ]
 
     findings = {name: output for name, output in previous.items() if name != "Orquestrador"}
+    if findings:
+        parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
+
+    return HumanMessage(content="\n\n".join(parts))
+
+
+def _build_response_check_message(state: AetherGraphState) -> HumanMessage:
+    """
+    Build the isolated review request sent to the response checker.
+
+    Deliberately shaped as "what was asked" followed by "what was generated"
+    (see the checker's own few-shot examples): its whole job is the comparison
+    between the two, and an answer read before the question is one already read
+    as an answer to something.
+
+    The specialists' findings come along as the evidence any factual claim in
+    the draft has to be traceable to. The draft itself is left out of them —
+    it is the text under review, and repeating it as a finding would let it
+    ground itself — and so are the checker's own earlier verdicts, which are
+    its opinion of the answer rather than anything analyzed about the case.
+
+    Args:
+        state: The current graph state, whose "output" holds the answer that
+            would be delivered.
+
+    Returns:
+        HumanMessage: The review request wrapping the original question, the
+            generated answer, and the findings behind it.
+    """
+
+    parts = [
+        f"Pergunta original do usuário: {state['initial_question']}",
+        f"Resposta gerada: '{state.get('output') or ''}'",
+    ]
+
+    previous = state.get("previous_agents") or {}
+    findings = {
+        name: output
+        for name, output in previous.items()
+        if name not in ("Orquestrador", RESPONSE_CHECKER)
+    }
     if findings:
         parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
 
@@ -313,17 +375,22 @@ def _roteador_node(state: AetherGraphState, config: RunnableConfig | None = None
 
 def _orquestrador_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
-    Invoke the orchestrator and record its draft answer for the guardrail to review.
+    Invoke the orchestrator and record its draft answer for the reviewers.
 
     The orchestrator's edge always leads to the guardrail, never to END, so its
-    draft is kept out of "messages" entirely; only an approved draft is later
-    promoted into the user-facing history by `_guardrail_node`.
+    draft is kept out of "messages" entirely: it goes to "output", where it
+    waits for both reviewers, and is only promoted into the user-facing history
+    by `_verificador_resposta_node`.
+
+    It is also recorded in "previous_agents", which is what the retries read as
+    context and what reports the agents a turn went through — "output" is only
+    ever the latest draft, and a rewritten one replaces it.
 
     Args:
         state: The current graph state.
 
     Returns:
-        dict: The state update, recording the draft in "previous_agents".
+        dict: The state update, recording the draft as the answer candidate.
     """
 
     message = _build_context_message(state)
@@ -331,19 +398,23 @@ def _orquestrador_node(state: AetherGraphState, config: RunnableConfig | None = 
 
     return {
         "previous_agents": {"Orquestrador": output},
+        "output": output,
         "next_agent": next_agent,
     }
 
 
 def _guardrail_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
     """
-    Invoke the output guardrail and either promote or hold back the draft answer.
+    Invoke the output guardrail and record its verdict on the draft answer.
 
-    On approval, the Orquestrador's draft (not the guardrail's own commentary)
-    is promoted into "messages" as the final user-facing answer. On rejection,
-    nothing is added to "messages" — only the review feedback and retry count
-    are recorded, so the run can loop back to the router without polluting the
-    user-facing history with an unapproved draft.
+    Approving is not delivering: the draft still has to clear the response
+    checker, which runs after this node, so nothing is written to "messages"
+    here at all. Writing on approval would hand the user an answer the checker
+    was about to reject, since that channel is exactly what the facade reads
+    the delivered answer from.
+
+    On rejection, the review feedback and the retry count are recorded, so the
+    run can loop back to the router with something to act on.
 
     Args:
         state: The current graph state.
@@ -360,14 +431,75 @@ def _guardrail_node(state: AetherGraphState, config: RunnableConfig | None = Non
     approved = output.strip().lower().startswith("aprovado")
     update = {"next_agent": next_agent, "guard_rail_approved": approved}
 
-    if approved:
-        draft = (state.get("previous_agents") or {}).get("Orquestrador", "")
-        update["messages"] = [{"role": "assistant", "content": draft, "name": "Orquestrador"}]
-    else:
+    if not approved:
         update["guard_rail_requested_changes"] = [output]
         update["guard_rail_retries"] = state["guard_rail_retries"] + 1
 
     return update
+
+
+def _verificador_resposta_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
+    """
+    Invoke the response checker and either deliver or hold back the answer.
+
+    The last agent of the conversational flow, and the only one that writes the
+    user-facing answer of that flow: on approval, the draft the state has been
+    holding (not the checker's own verdict) is promoted into "messages". On
+    rejection, nothing is delivered — only the verdict and the retry count are
+    recorded, so the run can loop back to the router.
+
+    It reviews what the guardrail already approved rather than replacing it:
+    the guardrail asks whether the draft is founded and well-toned, this asks
+    whether it is an answer to what was actually asked, and a draft can pass
+    the first and fail the second — which is the hallucination this node exists
+    to keep off the user's screen.
+
+    Its verdict is recorded in "previous_agents" like any other agent's output,
+    which is what reports it among the agents a turn went through.
+
+    Args:
+        state: The current graph state, whose "output" holds the answer under
+            review.
+        config: The run's configuration, carrying the output token cap.
+
+    Returns:
+        dict: The state update, including "response_check_approved" and, on
+            rejection, "response_check_requested_changes" and an incremented
+            "response_check_retries".
+    """
+
+    message = _build_response_check_message(state)
+    output, next_agent = _invoke_agent(RESPONSE_CHECKER, message, _max_tokens_from(config))
+
+    approved = output.strip().lower().startswith("aprovado")
+    update = {
+        "previous_agents": {RESPONSE_CHECKER: output},
+        "next_agent": next_agent,
+        "response_check_approved": approved,
+    }
+
+    if approved:
+        draft = state.get("output") or ""
+        update["messages"] = [{"role": "assistant", "content": draft, "name": "Orquestrador"}]
+    else:
+        update["response_check_requested_changes"] = [output]
+        update["response_check_retries"] = state["response_check_retries"] + 1
+
+    return update
+
+
+def _is_report_flow(config: RunnableConfig | None) -> bool:
+    """
+    Say whether a run entered through the report flow's entry point.
+
+    Args:
+        config: The run's configuration, optionally carrying an "entry_point".
+
+    Returns:
+        bool: True for a run started by `AekoInventoryAnalyzer.analyze()`.
+    """
+
+    return (config or {}).get("configurable", {}).get("entry_point") == INVENTORY_ENTRY_POINT
 
 
 def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
@@ -385,6 +517,13 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
     inventory analyst and the pollutant/green gas analysts already ran, their
     findings are in the state, and only the coordinator has to answer again.
 
+    Only the report flow reads this answer as the run's own: there it is the
+    last node, and `analyze()` parses the plan out of the message it writes. In
+    a chat the same plan is a finding for the Orquestrador to consolidate, so
+    nothing is written to "messages" — delivered as it comes, it would reach the
+    user as a document in this agent's fixed sections, and would reach them
+    without either reviewer of the conversational flow ever seeing it.
+
     The last attempt is recorded either way. Nothing is raised here — the graph
     has no opinion on what the text is for; the caller that parses it is the one
     that can tell an exhausted retry from a plan (see
@@ -397,7 +536,8 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
             output and returns what is wrong with it, empty when nothing is.
 
     Returns:
-        dict: The state update, recording the last attempt as the answer.
+        dict: The state update, recording the last attempt, and delivering it
+            only in the report flow.
     """
 
     agent_name = "Coordenador de Melhoria Contínua"
@@ -416,18 +556,23 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
 
         message = _build_format_retry_message(state, output, problems)
 
-    return {
+    update = {
         "previous_agents": {agent_name: output},
         "pending_agents": [{"agent": agent_name, "is_still_pending": False}],
         "next_agent": next_agent,
-        "messages": [{"role": "assistant", "content": output, "name": agent_name}],
     }
+
+    if _is_report_flow(config):
+        update["messages"] = [{"role": "assistant", "content": output, "name": agent_name}]
+
+    return update
 
 
 roteador_node = _roteador_node
 faq_node = _non_specialist_node_factory("FAQ", terminal=True)
 orquestrador_node = _orquestrador_node
 guardrail_node = _guardrail_node
+verificador_resposta_node = _verificador_resposta_node
 
 analista_inventarios_node = _specialist_node_factory("Análista de inventários")
 analista_poluentes_node = _specialist_node_factory("Analista de Poluentes")

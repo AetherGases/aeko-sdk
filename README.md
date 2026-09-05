@@ -17,6 +17,27 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
+## What's new in 3.2
+
+Version 3.2 adds a **ninth agent, `Verificador de Resposta`**, as the last step of the
+conversational flow. It compares what the user asked with what was actually generated and
+refuses an answer that claims anything the analyses do not support — a judge against
+hallucination, sitting after the output guardrail rather than in place of it.
+
+| Area | 3.1 | 3.2 |
+| --- | --- | --- |
+| Conversational flow | Ends at the output guardrail | Ends at `Verificador de Resposta`, which reviews what the guardrail approved |
+| Delivery | The guardrail's approval delivered the draft | Only the response checker's approval delivers it |
+| Retry cap | Guardrail: 3 rejections | Both reviewers: **2 rejections each** (`GUARD_RAIL_MAX_RETRIES`, `RESPONSE_CHECK_MAX_RETRIES`) |
+| A turn nobody approved | Returned normally with `message.output == ""` | Raises `MalformedAgentOutputError`, carrying the run's `aeko_metrics` |
+| Report flow | — | Unchanged: `analyze()` never reaches either reviewer |
+
+The one breaking change is the last row: a rejected turn now raises instead of returning
+an empty answer. Code that already handles `MalformedAgentOutputError` from `analyze()`
+needs no new exception type, only the same `except` around `send_message()`.
+
+---
+
 ## What's new in 3.1
 
 Version 3.1 makes the SDK **report what a request cost**. Both entry points now take an
@@ -97,7 +118,7 @@ difference is where the run enters the graph and how it ends.
 
 ## The agent system
 
-Eight agents, each with its own prompt, persona and tools. Names are in Portuguese
+Nine agents, each with its own prompt, persona and tools. Names are in Portuguese
 because they are also the routing keys the graph and `set_tools()` use — pass them
 exactly as written, accents included.
 
@@ -107,12 +128,13 @@ exactly as written, accents included.
 | `FAQ` | Answers institutional/conceptual questions directly. | fast |
 | `Orquestrador` | Consolidates the specialists' output and replies to the user. | fast |
 | `Guardrail de Saída` | Reviews the consolidated answer before it can leave. | fast |
+| `Verificador de Resposta` | Last word of the chat flow: compares what was asked with what was generated. | fast |
 | `Análista de inventários` | Reads the GHG inventory itself. | slow |
 | `Analista de Poluentes` | Pollutant analysis. | slow |
 | `Analista de Gases Verdes` | Green gas alternatives. | slow |
-| `Coordenador de Melhoria Contínua` | Writes the improvement plan. | slow |
+| `Coordenador de Melhoria Contínua` | Writes the improvement plan. Terminal in the report flow; a finding for the orchestrator in a chat. | slow |
 
-The four cheap agents (classify, consolidate, review) run on `fast_model`; the four
+The five cheap agents (classify, consolidate, review) run on `fast_model`; the four
 specialist analysts run on `slow_model`. Both are configurable, and each model is
 registered with the other as its fallback — a provider hiccup degrades a run rather than
 failing it, which is also why a turn can report a model you did not ask for.
@@ -121,7 +143,8 @@ Agents hand off to each other by ending their answer with a literal `Next agent:
 line, which the graph reads and the SDK strips before the text reaches you. It is
 protocol between agents, never part of an answer.
 
-**Conversational flow** — enters at the router, always passes the guardrail:
+**Conversational flow** — enters at the router; a consolidated answer passes the
+guardrail and then the response checker:
 
 ```
 send_message()
@@ -132,19 +155,33 @@ send_message()
       ├──▶ Analista de Poluentes ─────┐
       ├──▶ Analista de Gases Verdes ──┼──▶ Orquestrador ──▶ Guardrail de Saída
       │                               │                            │
-      └──▶ Coordenador de Melhoria ───┴───────────▶ answer   approved? ──▶ answer
-                                                              │
-                                                       rejected (up to 3x)
-                                                              │
-                                                              └──▶ back to Roteador
+      └──▶ Coordenador de Melhoria ───┘               approved? ──▶ Verificador de Resposta
+                                                          │                     │
+                                                   rejected (2x)          approved? ──▶ answer
+                                                          │                     │
+                                                          ▼              rejected (2x)
+                                                      Roteador ◀─────────────────┘
 ```
 
-The guardrail can send a draft back to the router **3 times**; a fourth rejection ends
-the run with **no** answer at all — `AekoMessageResponse.message.output` is `""` and
-`approved` is `False`. Always check it.
+Only the FAQ answers the user directly. Every other agent of this flow — the coordinator
+of improvement plans included — produces a **finding**, which the Orquestrador turns into
+the answer. That is why the plan's `## Problema definido` / `## Método` / `## Raciocínio`
+headings never reach a chat: they are the shape of a document the report flow persists,
+not of a reply.
+
+The two reviewers ask different questions of the same draft. The **guardrail** asks
+whether every number and recommendation is grounded in the analyses that produced it, and
+whether the tone fits. The **response checker** asks whether the draft answers what was
+actually asked, in full, and asserts nothing the analyses do not support — it is the last
+thing standing between a hallucination and the user, which is why nothing is delivered
+until it approves.
+
+Each of them can send the answer back to the router **twice**. The second rejection ends
+the run with **no** answer at all, and `send_message()` raises `MalformedAgentOutputError`
+rather than returning an empty turn — the run's `aeko_metrics` travels on the exception.
 
 **Inventory flow** — enters at the inventory analyst, ends at a terminal node, so it
-never passes the guardrail:
+passes neither reviewer:
 
 ```
 analyze()
@@ -252,7 +289,7 @@ from aeko import Aeko
 
 Aeko.config(
     api_key=settings.GEMINI_API_KEY,
-    fast_model="gemini-3.1-flash-lite",     # router, FAQ, orchestrator, guardrail
+    fast_model="gemini-3.1-flash-lite",     # router, FAQ, orchestrator, both reviewers
     slow_model="gemini-3.5-flash",          # the four specialist analysts
     max_tokens=1024,                        # output cap for chat turns
     report_max_tokens=8192,                 # output cap for the inventory report
@@ -362,7 +399,7 @@ you can correlate documents, and a model can do nothing with them.
 | `message` | The turn, as one entry of `session.messages` — ready to append. |
 | `id_session` / `id_user` | The `_id`s of the session and user this answer belongs to, echoed back from the session you sent in. |
 | `agents_called` | Names of the agents that contributed, in call order. |
-| `approved` | Whether the output guardrail approved the answer. |
+| `approved` | Whether the output guardrail approved the answer. Always `True` on a returned response — an answer no reviewer approved raises instead. |
 | `guardrail_retries` | How many times the guardrail sent the draft back. |
 | `aeko_metrics` | What the request cost and went through — see [Event tracking](#5-event-tracking). |
 
@@ -375,7 +412,7 @@ the right conversation. The turn itself mirrors the collection exactly:
 | Field | Meaning |
 | --- | --- |
 | `input` | What the user sent. |
-| `output` | The final user-facing text, already stripped of the agents' internal routing markers. **Empty when the guardrail never approved a draft.** |
+| `output` | The final user-facing text, already stripped of the agents' internal routing markers. Never empty: a turn no reviewer approved raises instead of returning. |
 | `submitted_at` | When the turn was answered (UTC). |
 
 **What the turn cost is not on the turn.** The model that served it and the tokens it
@@ -390,9 +427,9 @@ sum(agent.input_tokens for agent in response.aeko_metrics.used_agents)
 
 An answered turn is appended to the `AekoSession` you passed in, and `updated_at` is
 bumped — the same object, updated in place, so you can persist exactly what you handed
-over. **Only a final result is recorded**: a turn the guardrail rejected is *not*
-appended, because a draft that never reached the user cannot become context for the next
-question.
+over. **Only a final result is recorded**: a turn a reviewer rejected raises and
+is *not* appended, because a draft that never reached the user cannot become context for
+the next question.
 
 **User memories.** Hand the `user_memory` documents to the constructor and **every one of
 them** is rendered into the same business context the user's role and usecase go into, so
@@ -486,7 +523,9 @@ Budget for it: a plan that takes every retry costs five coordinator calls at the
 token cap, on top of the analysts. A well-formed answer costs exactly one.
 
 There is no `approved` field: this flow ends at the continuous improvement coordinator, a
-terminal node, and never reaches the output guardrail.
+terminal node, and never reaches the output guardrail or the response checker. Its answer
+is a document to be parsed, not a message to a user, so a reviewer sitting at the end of
+it would be judging the wrong thing.
 
 ### 5. Event tracking
 
@@ -499,7 +538,7 @@ answer or is lost when the process moves on.
 | --- | --- |
 | `id_request` | The `id_request` you passed in, echoed back. |
 | `latency` | How long the whole request took, in whole milliseconds. |
-| `error_description` | Why it failed, or `None`. Filled for a turn the guardrail never approved, even though that turn returns normally. |
+| `error_description` | Why it failed, or `None`. Filled from the exception when a request raised — including a turn neither reviewer approved. |
 | `flow` | `"conversational"` for `send_message()`, `"analytical"` for `analyze()`. |
 | `used_agents` | One `AekoAgentMetrics` per agent **invocation**, in call order. |
 
@@ -512,21 +551,21 @@ Each entry of `used_agents`:
 | `llm` | The model that served it. Comma-separated if the cross-model fallback fired mid-call. |
 | `used_tools` | The tools it **actually called**, in call order — not the ones registered for it. |
 
-**One entry per call, not per agent.** The guardrail's retry loop runs the same agents
-again and again, and a turn that paid for four routings is not a turn that paid for one:
+**One entry per call, not per agent.** The reviewers' retry loops run the same agents
+again and again, and a turn that paid for three routings is not a turn that paid for one:
 
 ```python
 tracking = response.aeko_metrics
 
 [agent.name for agent in tracking.used_agents]
 # ['Roteador', 'Analista de Poluentes', 'Orquestrador', 'Guardrail de Saída',
-#  'Roteador', 'Orquestrador', 'Guardrail de Saída', ...]
+#  'Verificador de Resposta', 'Roteador', 'Orquestrador', ...]
 
 sum(agent.input_tokens for agent in tracking.used_agents)
-# 176 — what the whole turn cost, guardrail retries included
+# 176 — what the whole turn cost, review retries included
 ```
 
-A turn with a rejected guardrail can reach ~16 entries. Budget the document size
+A turn both reviewers kept sending back can reach ~12 entries. Budget the document size
 accordingly.
 
 **A failed request still reports.** `analyze()` raises `MalformedAgentOutputError` when
@@ -572,6 +611,7 @@ from aeko import (
     AekoTool,
     AekoUser,
     AekoUserMemory,
+    MalformedAgentOutputError,
 )
 
 from .settings import settings
@@ -623,16 +663,19 @@ def chat(body: ChatRequest):
         )
     except AekoNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    # 3. Persist what the run cost, whether or not it produced an answer.
-    db.aeko_metrics.insert_one(response.aeko_metrics.model_dump())
-
-    # 4. The guardrail can refuse every draft — there is no answer to persist.
-    if not response.message.output:
+    except MalformedAgentOutputError as exc:
+        # 3. Neither reviewer approved a draft: there is no answer to persist,
+        #    but the run still has to be accounted for — its metrics come on
+        #    the exception, since there is no response to carry them.
+        if exc.aeko_metrics:
+            db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
         raise HTTPException(
             status_code=502,
-            detail="The output guardrail rejected every draft. Please rephrase.",
-        )
+            detail="No answer passed review. Please rephrase.",
+        ) from exc
+
+    # 4. Persist what the run cost.
+    db.aeko_metrics.insert_one(response.aeko_metrics.model_dump())
 
     # 5. Persist the turn so the next request (on any worker) can replay it.
     db.session.update_one(
@@ -705,7 +748,7 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | --- | --- | --- |
 | `AekoNotConfiguredError` | `Aeko.config()` was never called, or the key is empty/not a string. | `503` — a deployment problem, not a user one. |
 | `UnknownAgentError` | `set_tools()` got a key that is not an agent name. Carries `.agent` and `.known_agents`. | Fail at startup. |
-| `MalformedAgentOutputError` | An agent's answer did not match the shape its prompt demands — today, the improvement plan's three headings — and did not recover after four rewrites. | `502` — retry the analysis rather than persisting a guess. |
+| `MalformedAgentOutputError` | A run produced nothing usable: the improvement plan never came back in its three headings after four rewrites, or a chat turn was rejected by the output guardrail or the response checker up to their retry caps. | `502` — retry rather than persisting a guess or an empty turn. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
 
 Every `AekoError` raised *inside* a request carries that request's
@@ -725,10 +768,10 @@ except AekoError as exc:
     raise HTTPException(status_code=500, detail=str(exc)) from exc
 ```
 
-Remember that a *rejected* answer is not an exception — it is a run that returns
-normally with an empty `message.output` and `approved=False`. Its event tracking still
-records it as a failure, in `error_description`, which is the only place that outcome is
-written down.
+A *rejected* answer is an exception since 3.2: a turn neither reviewer approved raises
+`MalformedAgentOutputError` instead of returning an empty `message.output`. The run is
+still fully accounted for — its event tracking comes on `exc.aeko_metrics`, with the
+reason in `error_description`.
 
 ---
 
@@ -808,9 +851,10 @@ Four consequences worth planning for:
 2. **`user_info` is now structured.** The free-form string that went into `prepare()` is
    `AekoUser.role` plus `AekoUser.usecase`, and anything else you were packing into it
    probably belongs in `AekoUserMemory` — which is rendered in a section of its own.
-3. **An answer can be empty.** `.answer` was always populated; `.message.output` is `""`
-   when the guardrail rejected every draft, and that is a successful run, not an
-   exception. `approved` tells you which happened.
+3. **An answer can be refused.** `.answer` was always populated; since 3.2 a turn that
+   neither the output guardrail nor the response checker approved raises
+   `MalformedAgentOutputError` instead of returning, so `.message.output` is never empty
+   on a response you actually receive.
 4. **The improvement plan is structured.** `analyze()` returns `defined_problem`, `method`
    and `reasoning` instead of one `answer` string, and raises `MalformedAgentOutputError`
    when the coordinator never produces them — code that used to split the report apart
@@ -905,7 +949,8 @@ session.model_dump(by_alias=True, exclude_none=True)
 | `slow_model` | `gemini-3.5-flash` | `Aeko.config()` |
 | `max_tokens` | `1024` | `Aeko.config()` |
 | `report_max_tokens` | `8192` | `Aeko.config()` |
-| Guardrail retry cap | `3` | fixed — `GUARD_RAIL_MAX_RETRIES` |
+| Guardrail retry cap | `2` | fixed — `GUARD_RAIL_MAX_RETRIES` |
+| Response check retry cap | `2` | fixed — `RESPONSE_CHECK_MAX_RETRIES` |
 | Plan rewrite cap | `4` | fixed — `PLAN_FORMAT_MAX_RETRIES` |
 | Replayed turns | `10` | fixed — `SESSION_HISTORY_USAGE` |
 
@@ -1014,15 +1059,19 @@ nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
 4. **Toda resposta carrega métricas.** `resposta.aeko_metrics` e
    `analise.aeko_metrics` trazem latência, erro, fluxo e o custo por chamada de agente —
    persista onde sua telemetria vive. Numa exceção, as métricas vêm em `exc.aeko_metrics`.
-5. **Resposta vazia não é exceção.** Se o `Guardrail de Saída` reprovar todas as
-   tentativas (limite de 3 devoluções), o run termina com `message.output == ""` e
-   `approved is False` — verifique sempre antes de persistir. Já um plano de melhoria fora
-   do formato levanta `MalformedAgentOutputError` — depois de o Coordenador ser convidado a
-   reescrever a resposta até quatro vezes —, em vez de devolver campos inventados.
+5. **Resposta reprovada levanta exceção.** O fluxo conversacional passa por dois
+   revisores: o `Guardrail de Saída`, que checa se a resposta está fundamentada nas
+   análises, e o `Verificador de Resposta`, que compara o que foi pedido com o que foi
+   gerado e barra o que as análises não sustentam. Cada um pode devolver a resposta ao
+   Roteador **2 vezes**; na segunda reprovação o run acaba sem resposta e o
+   `send_message()` levanta `MalformedAgentOutputError` — as métricas vêm em
+   `exc.aeko_metrics`. Um plano de melhoria fora do formato levanta a mesma exceção,
+   depois de o Coordenador ser convidado a reescrever a resposta até quatro vezes.
 
 Os nomes dos agentes (`Roteador`, `FAQ`, `Orquestrador`, `Guardrail de Saída`,
-`Análista de inventários`, `Analista de Poluentes`, `Analista de Gases Verdes`,
-`Coordenador de Melhoria Contínua`) são também as chaves de roteamento — use-os
+`Verificador de Resposta`, `Análista de inventários`, `Analista de Poluentes`,
+`Analista de Gases Verdes`, `Coordenador de Melhoria Contínua`) são também as chaves de
+roteamento — use-os
 exatamente como escritos, inclusive acentuação. A seção em inglês acima tem o detalhamento
 completo, incluindo um exemplo de serviço FastAPI stateless.
 

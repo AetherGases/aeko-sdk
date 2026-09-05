@@ -55,11 +55,21 @@ ANALYSIS_FLOW = {
     "Analista de Poluentes": "CO2 critico.\nNext agent: Orquestrador",
     "Orquestrador": f"{CONSOLIDATED}\nNext agent: Guardrail de Saída",
     "Guardrail de Saída": "Aprovado.\nNext agent: Nenhum",
+    "Verificador de Resposta": "Aprovado.\nNext agent: Nenhum",
 }
 
 REJECTED_FLOW = {
     **ANALYSIS_FLOW,
     "Guardrail de Saída": "Reprovado. Sem fundamentacao.\nNext agent: Nenhum",
+}
+
+# Approved by the guardrail and caught by the response checker instead.
+CHECKER_REJECTED_FLOW = {
+    **ANALYSIS_FLOW,
+    "Verificador de Resposta": (
+        "Reprovado. A resposta afirma o que nenhuma analise sustenta."
+        "\nNext agent: Roteador"
+    ),
 }
 
 # The coordinator is instructed to answer with exactly these three fields, each
@@ -734,24 +744,63 @@ def test_the_session_keeps_its_whole_history_even_past_the_limit(messenger):
     assert session.messages[0].input == "pergunta 0"
 
 
-def test_a_rejected_draft_produces_no_answer(messenger):
+def test_a_rejected_draft_raises_instead_of_answering_nothing(messenger):
+    """
+    A turn nobody approved has no answer to hand back, so it fails loudly.
+
+    Returning an empty answer left the caller to notice the emptiness on its
+    own; the API already treats `MalformedAgentOutputError` as the run that
+    produced nothing usable.
+    """
+
     instance, _ = messenger(REJECTED_FLOW)
+
+    with pytest.raises(MalformedAgentOutputError):
+        instance.send_message(
+            "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+        )
+
+
+def test_an_answer_the_response_checker_rejects_is_never_delivered(messenger):
+    instance, _ = messenger(CHECKER_REJECTED_FLOW)
+
+    with pytest.raises(MalformedAgentOutputError):
+        instance.send_message(
+            "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+        )
+
+
+def test_the_response_checker_is_reported_among_the_agents(messenger):
+    instance, _ = messenger(ANALYSIS_FLOW)
 
     response = instance.send_message(
         "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
     )
 
-    assert response.message.output == ""
-    assert response.approved is False
-    assert response.guardrail_retries > 0
+    assert "Verificador de Resposta" in response.agents_called
+
+
+def test_the_response_checker_reads_the_answer_it_judges(messenger):
+    instance, llm = messenger(ANALYSIS_FLOW)
+
+    instance.send_message(
+        "Quais os riscos do meu inventario?", make_session(), id_request=REQUEST_ID
+    )
+
+    prompt = llm.prompt_for("Verificador de Resposta")
+
+    assert "Quais os riscos do meu inventario?" in prompt
+    assert CONSOLIDATED in prompt
 
 
 def test_a_rejected_turn_does_not_pollute_the_history(messenger):
     session = make_session()
     instance, llm = messenger(REJECTED_FLOW)
 
-    instance.send_message("Quais os riscos do meu inventario?", session, id_request=REQUEST_ID)
-    instance.send_message("E agora?", session, id_request=REQUEST_ID)
+    with pytest.raises(MalformedAgentOutputError):
+        instance.send_message(
+            "Quais os riscos do meu inventario?", session, id_request=REQUEST_ID
+        )
 
     assert session.messages == [], "so o resultado final e gravado; um reprovado nao e"
     assert "Histórico da conversa" not in llm.prompt_for("Roteador")
@@ -1002,6 +1051,7 @@ def test_a_well_formed_plan_is_never_retried(configured, use_fake_llm):
 
 def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
     llm = use_fake_llm({
+        **ANALYSIS_FLOW,
         "Roteador": "Plano de melhoria.\nNext agent: Coordenador de Melhoria Contínua",
         "Coordenador de Melhoria Contínua": "Plano em prosa, sem secoes.\nNext agent: Nenhum",
     })
@@ -1011,7 +1061,9 @@ def test_the_chat_flow_does_not_retry_the_coordinator(configured, use_fake_llm):
     )
 
     assert _coordinator_calls(llm) == 1, "so o fluxo de inventario valida o formato"
-    assert response.message.output == "Plano em prosa, sem secoes."
+    assert response.message.output == CONSOLIDATED, (
+        "no chat o plano e insumo do Orquestrador, nao a resposta entregue"
+    )
 
 
 def test_analyze_enters_through_the_inventory_analyst(configured, use_fake_llm):

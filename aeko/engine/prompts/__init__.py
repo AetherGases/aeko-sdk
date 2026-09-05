@@ -9,6 +9,7 @@ from .orchestrator import ORCHESTRATOR_SPEC
 from .output_guardrail import OUTPUT_GUARDRAIL_SPEC
 from .pollutants_analyst import POLLUTANTS_ANALYST_SPEC
 from .report_analyst import REPORT_ANALYST_SPEC
+from .response_checker import RESPONSE_CHECKER_SPEC
 from .router import ROUTER_SPEC
 
 # Keyed by each spec's own `agent` field, which is exactly the name the graph
@@ -26,6 +27,7 @@ PROMPT_SPECS: dict[str, PromptSpec] = {
         FAQ_SPEC,
         ORCHESTRATOR_SPEC,
         OUTPUT_GUARDRAIL_SPEC,
+        RESPONSE_CHECKER_SPEC,
         REPORT_ANALYST_SPEC,
         POLLUTANTS_ANALYST_SPEC,
         GREEN_GASES_ANALYST_SPEC,
@@ -47,6 +49,7 @@ __all__ = [
     "PROMPT_SPECS",
     "PromptSpec",
     "REPORT_ANALYST_SPEC",
+    "RESPONSE_CHECKER_SPEC",
     "ROUTER_SPEC",
     "build_prompt",
 ]
