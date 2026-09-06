@@ -9,6 +9,8 @@ from langchain_core.prompts import (
 )
 from langchain_core.prompts.chat import MessagesPlaceholder
 
+from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
+
 DEFAULT_INITIAL_CONTEXT = (
     "Você é um agente do ecossistema Aether: uma empresa que busca auxiliar industrias na transição e monintoramento da substituição de gases poluentes para gases verdes."
 )

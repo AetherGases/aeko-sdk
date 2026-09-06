@@ -1,0 +1,10 @@
+"""Constants used by the execution engine."""
+
+DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_SLOW_MODEL = "gemini-3.5-flash"
+DEFAULT_MAX_TOKENS = 1024
+DEFAULT_REPORT_MAX_TOKENS = 8192
+DEFAULT_TEMPERATURE = 1.0
+DEFAULT_TOP_P = 0.95
+DEFAULT_TOP_K = 64
+

@@ -1,3 +1,5 @@
+"""Data transfer objects exposed by the SDK configuration layer."""
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -5,12 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from aeko.shared import AekoMetrics
+from aeko.config.constants import LOG_ONLY_FIELDS
 
-# Fields that exist only so the API can persist and correlate documents. They
-# are deliberately left out of every prompt rendering below: a model that reads
-# them gains nothing and may start echoing internal identifiers back at the
-# user.
-LOG_ONLY_FIELDS = ("_id", "id", "id_external_user", "id_user", "expires_at")
 
 
 def _now() -> datetime:
@@ -99,8 +97,6 @@ class AekoUser(BaseModel):
             user who has not been characterized yet.
     """
 
-    # Populating by field name is enabled so callers can build a DTO in Python
-    # with `id=...` rather than the awkward `**{"_id": ...}`.
     model_config = ConfigDict(populate_by_name=True)
 
     id: str | None = Field(default=None, alias="_id")

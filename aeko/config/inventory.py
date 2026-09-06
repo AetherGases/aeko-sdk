@@ -1,3 +1,5 @@
+"""Inventory analysis API for generating improvement plans."""
+
 from aeko.config._text import parse_sections, strip_routing_marker
 from aeko.config.dto import AekoAnalysisResponse, AekoImprovementPlan
 from aeko.config.exceptions import MalformedAgentOutputError
@@ -8,18 +10,10 @@ from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import PLAN_SECTIONS
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import Flow, processing
+from aeko.config.constants import INVENTORY_ENTRY_POINT, INVENTORY_LOG_MODULE
 
-INVENTORY_ENTRY_POINT = "Análista de inventários"
+LOG_MODULE = INVENTORY_LOG_MODULE
 
-# The module bracket every line written from here carries.
-LOG_MODULE = "inventory"
-
-# The fields the continuous improvement coordinator is instructed to answer
-# with, and the only ones read back from it. They come from the same mapping
-# its prompt is written from (see `PLAN_SECTIONS`), so the sections the agent
-# is taught and the ones read here cannot drift apart. Everything else an
-# `AekoImprovementPlan` carries — `_id`, `updated_at` — belongs to the database
-# and to this SDK respectively, so the model is never given a say in them.
 PLAN_FIELDS = tuple(PLAN_SECTIONS)
 
 
@@ -41,7 +35,7 @@ def _plan_sections_in(answer: str) -> dict[str, str]:
 
     sections = parse_sections(strip_routing_marker(answer), PLAN_SECTIONS)
 
-    return {field: text for field, text in sections.items() if text} # Because section.name can be None
+    return {field: text for field, text in sections.items() if text}
 
 
 def _format_problems_in(answer: str) -> list[str]:
@@ -193,9 +187,6 @@ class AekoInventoryAnalyzer:
 
         state = create_initial_state(inventory, company_context=self._context)
 
-        # Wraps the parsing as well as the run: an answer that never took the
-        # requested shape is a request that failed, and is logged in red as one
-        # by the exception `_to_improvement_plan` raises.
         with processing(Flow.REPORT, LOG_MODULE, id_request) as run:
             run.item("inventory", id_external_inventory)
             run.item("input", f"{len(inventory)} characters")
@@ -206,10 +197,6 @@ class AekoInventoryAnalyzer:
                     "configurable": {
                         "entry_point": INVENTORY_ENTRY_POINT,
                         "max_tokens": RUNTIME.report_max_tokens,
-                        # What this flow needs the coordinator's answer to look
-                        # like. The graph itself has no opinion on that, so the
-                        # node asks for a rewrite through this and nothing else
-                        # in the engine has to know what a plan is.
                         "validate_answer": _format_problems_in,
                     }
                 },
@@ -223,7 +210,4 @@ class AekoInventoryAnalyzer:
 
             plan = _to_improvement_plan(answer, id_external_inventory)
 
-        # Assembled once the run has closed, so the latency it reports is the
-        # analysis's own. A run that never got here raised instead, carrying the
-        # same event tracking out on the exception (see `processing`).
         return AekoAnalysisResponse(plan=plan, aeko_metrics=run.event_tracking())

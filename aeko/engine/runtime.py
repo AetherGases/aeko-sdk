@@ -2,20 +2,15 @@ from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields
 from typing import TYPE_CHECKING, Any
+from aeko.engine.constants import (
+    DEFAULT_FAST_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_REPORT_MAX_TOKENS,
+    DEFAULT_SLOW_MODEL, DEFAULT_TEMPERATURE, DEFAULT_TOP_K, DEFAULT_TOP_P,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - import kept out of runtime to avoid a
     # cycle: aeko.config is the public facade built *on top of* this engine,
     # so the engine must never import it at module load time.
     from aeko.config.dto import AekoTool
-
-DEFAULT_FAST_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_SLOW_MODEL = "gemini-3.5-flash"
-
-# Chat answers are short; the inventory flow writes a full report and needs far
-# more room (see AekoInventoryAnalyzer, which opts into REPORT_MAX_TOKENS).
-DEFAULT_MAX_TOKENS = 1024
-DEFAULT_REPORT_MAX_TOKENS = 8192
-
 
 @dataclass
 class AekoRuntime:
@@ -44,6 +39,9 @@ class AekoRuntime:
     slow_model: str = DEFAULT_SLOW_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
     report_max_tokens: int = DEFAULT_REPORT_MAX_TOKENS
+    temperature: float = DEFAULT_TEMPERATURE
+    top_p: float = DEFAULT_TOP_P
+    top_k: int = DEFAULT_TOP_K
     tools: dict[str, list["AekoTool"]] = field(default_factory=dict)
 
     agents: dict[int, dict[str, Any]] = field(default_factory=dict, repr=False)

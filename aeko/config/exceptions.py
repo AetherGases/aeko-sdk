@@ -1,3 +1,5 @@
+"""Exceptions raised by the SDK configuration layer."""
+
 from aeko.shared import AekoMetrics
 
 

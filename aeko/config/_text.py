@@ -1,3 +1,5 @@
+"""Text normalization helpers for agent protocol messages."""
+
 import unicodedata
 
 ROUTING_MARKER = "Next agent: "

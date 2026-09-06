@@ -1,3 +1,5 @@
+"""Conversational API for the SDK's agent graph."""
+
 from typing import Any, Sequence
 
 from aeko.config._text import strip_routing_marker
@@ -16,9 +18,9 @@ from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import AGENT_NAMES
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import Flow, log_failure, log_success, processing
+from aeko.config.constants import MEMORIES_LABEL, MESSENGER_LOG_MODULE, SESSION_HISTORY_USAGE
 
-# The module bracket every line written from here carries.
-LOG_MODULE = "messenger"
+LOG_MODULE = MESSENGER_LOG_MODULE
 
 
 def _final_answer(result: dict) -> str:
@@ -74,12 +76,6 @@ def _agents_called(result: dict) -> list[str]:
     return called
 
 
-# How many turns of "session.messages" a run is allowed to read back. Enough to
-# keep a follow-up question intelligible, bounded so a long conversation neither
-# crowds out the actual question nor grows what each turn costs without limit.
-# The session itself is never trimmed: this caps what the agents see, not what
-# the API persists.
-SESSION_HISTORY_USAGE = 10
 
 
 def _history_from(session: AekoSession) -> str:
@@ -117,11 +113,6 @@ def _history_from(session: AekoSession) -> str:
     return "\n".join(lines)
 
 
-# The label the memories are rendered under, inside the context every agent
-# reads. They are deliberately a section of their own rather than more lines of
-# the user's role/usecase: what the user *is* and what has been *remembered*
-# about them are different claims, and the agents are instructed accordingly.
-MEMORIES_LABEL = "Memórias do usuário:"
 
 
 def _memories_context(memories: Sequence[AekoUserMemory]) -> str:
@@ -165,10 +156,6 @@ class AekoMessenger:
     The session may carry any number of turns; only the most recent ones are
     read back into a run (see `SESSION_HISTORY_USAGE`).
     """
-
-    # Tools are process-wide. Registering them per instance would rebuild the
-    # shared agent registry behind the other instances' backs, so `set_tools`
-    # is deliberately a classmethod.
 
     def __init__(self, user: AekoUser, memories: Sequence[AekoUserMemory] | None = None):
         """
@@ -233,9 +220,6 @@ class AekoMessenger:
 
         RUNTIME.configure(tools=normalized)
 
-        # Which agents were equipped, and with how many tools each — never what
-        # a tool is or when one runs: registering tools is configuration, using
-        # one is the agent's business and is deliberately left unlogged.
         registered = ", ".join(
             f"{agent}={len(agent_tools)}" for agent, agent_tools in normalized.items()
         )
@@ -287,12 +271,6 @@ class AekoMessenger:
             history=_history_from(session),
         )
 
-        # One record is written for this whole turn, when it ends, listing what
-        # it went through — every agent the graph called included, which reach
-        # the list on their own (see `record_agent_call`). The message itself is
-        # never logged: it is the user's, and its length says as much about the
-        # turn as its text does. Read before the answer is appended below, so
-        # the history is the one the agents actually saw.
         with processing(Flow.CONVERSATIONAL, LOG_MODULE, id_request) as run:
             run.item("session", session.id or "-")
             run.item("user", session.id_user or "-")
@@ -307,20 +285,11 @@ class AekoMessenger:
 
             answer = _final_answer(result)
 
-            # A run that reached neither reviewer's approval has nothing to
-            # hand over, and raising is what says so: the alternative was an
-            # answer-shaped return the caller had to notice was empty. Raised
-            # inside the request so its event tracking travels on the exception
-            # (see `AekoError.aeko_metrics`), which is the only place this
-            # failure is ever recorded.
             if not answer:
                 raise MalformedAgentOutputError(
                     "no answer approved by the output guardrail or the response checker"
                 )
 
-            # What the turn cost is not recorded on the turn: it is reported
-            # per agent invocation on this request's event tracking, which the
-            # graph collects on its own (see `agent_call`).
             turn = AekoMessage(input=message, output=answer)
 
             session.messages.append(turn)
@@ -330,9 +299,6 @@ class AekoMessenger:
             approved = bool(result.get("guard_rail_approved"))
             guardrail_retries = int(result.get("guard_rail_retries", 0))
 
-        # Assembled once the run has closed, which is when its event tracking
-        # is settled: a turn the guardrail rejected has to carry that failure,
-        # and the latency has to be the request's, not the caller's.
         return AekoMessageResponse(
             message=turn,
             aeko_metrics=run.event_tracking(),

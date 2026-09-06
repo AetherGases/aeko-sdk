@@ -293,6 +293,9 @@ Aeko.config(
     slow_model="gemini-3.5-flash",          # the four specialist analysts
     max_tokens=1024,                        # output cap for chat turns
     report_max_tokens=8192,                 # output cap for the inventory report
+    temperature=1.0,                        # sampling temperature
+    top_p=0.95,                              # nucleus sampling probability
+    top_k=64,                                # candidate sampling limit
 )
 ```
 
@@ -869,7 +872,7 @@ Everything below is importable directly from `aeko`.
 
 | Member | Signature |
 | --- | --- |
-| `config` | `config(api_key: str, *, fast_model: str \| None = None, slow_model: str \| None = None, max_tokens: int \| None = None, report_max_tokens: int \| None = None) -> None` |
+| `config` | `config(api_key: str, *, fast_model: str \| None = None, slow_model: str \| None = None, max_tokens: int \| None = None, report_max_tokens: int \| None = None, temperature: float \| None = None, top_p: float \| None = None, top_k: int \| None = None) -> None` |
 | `is_configured` | `is_configured() -> bool` |
 | `reset` | `reset() -> None` |
 
@@ -949,6 +952,9 @@ session.model_dump(by_alias=True, exclude_none=True)
 | `slow_model` | `gemini-3.5-flash` | `Aeko.config()` |
 | `max_tokens` | `1024` | `Aeko.config()` |
 | `report_max_tokens` | `8192` | `Aeko.config()` |
+| `temperature` | `1.0` | `Aeko.config()` |
+| `top_p` | `0.95` | `Aeko.config()` |
+| `top_k` | `64` | `Aeko.config()` |
 | Guardrail retry cap | `2` | fixed — `GUARD_RAIL_MAX_RETRIES` |
 | Response check retry cap | `2` | fixed — `RESPONSE_CHECK_MAX_RETRIES` |
 | Plan rewrite cap | `4` | fixed — `PLAN_FORMAT_MAX_RETRIES` |
