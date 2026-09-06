@@ -1,13 +1,11 @@
+"""Public SDK configuration entry point."""
+
 from aeko.config.exceptions import AekoNotConfiguredError
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import log_failure, log_success
+from aeko.config.constants import CONFIG_LOG_MODULE
 
-# The module bracket every line written from here carries.
-LOG_MODULE = "config"
-
-# Configuring the SDK is not a request, so these lines are deliberately not
-# built like one: no detail list, no duration, no agents — just the setting
-# that changed, on a line of its own, whenever it changes.
+LOG_MODULE = CONFIG_LOG_MODULE
 
 
 class Aeko:
@@ -21,7 +19,9 @@ class Aeko:
 
     @staticmethod
     def config(api_key: str, *, fast_model: str | None = None, slow_model: str | None = None,
-               max_tokens: int | None = None, report_max_tokens: int | None = None) -> None:
+               max_tokens: int | None = None, report_max_tokens: int | None = None,
+               temperature: float | None = None, top_p: float | None = None,
+               top_k: int | None = None) -> None:
         """
         Configure the SDK for this process.
 
@@ -32,6 +32,9 @@ class Aeko:
             max_tokens: Output cap for the conversational flow.
             report_max_tokens: Output cap for the inventory report flow, which
                 writes far longer answers than a chat turn.
+            temperature: Sampling temperature for all models.
+            top_p: Nucleus sampling probability for all models.
+            top_k: Candidate sampling limit for all models.
 
         Raises:
             AekoNotConfiguredError: If `api_key` is empty or not a string.
@@ -50,13 +53,11 @@ class Aeko:
             slow_model=slow_model,
             max_tokens=max_tokens,
             report_max_tokens=report_max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
         )
 
-        # The settings are read back off the runtime rather than off the
-        # arguments so the line reports what is actually in effect, defaults
-        # included, instead of only the overrides this call happened to pass.
-        # The API key is never among them: it is a credential, and a log is
-        # the last place one should end up.
         log_success(
             LOG_MODULE,
             "SDK configured"

@@ -16,6 +16,7 @@ dynamic = ["version"]
 # Ranges (not the `==` pins of requirements.txt) so installing the SDK next to
 # other LangChain packages does not deadlock a consumer's resolver.
 dependencies = [
+    "langchain>=1.0,<2",
     "langchain-core>=1.6.1,<2",
     "pydantic>=2.9,<3",
     "langchain-classic>=1.0.8,<2",

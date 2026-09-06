@@ -256,11 +256,13 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
         # point every agent's output enters the run through, so everything
         # downstream — "previous_agents", the "messages" channel, the routing
         # marker below — goes on being the plain text it was written against.
-        output = text_of(
-            agents[agent_name].invoke(
-                {"messages": [message]}, config={"callbacks": [call]}
-            )["output"]
+        result = agents[agent_name].invoke(
+            {"messages": [message]}, config={"callbacks": [call]}
         )
+        if "output" in result:
+            output = text_of(result["output"])
+        else:
+            output = text_of(result["messages"][-1].content)
 
     raw_next = output.split("Next agent: ")[-1].strip() if "Next agent: " in output else ""
 

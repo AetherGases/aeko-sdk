@@ -1,17 +1,13 @@
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
-from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import MessagesPlaceholder
 
 from aeko.engine.agents.llms import create_llms
 from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
 from aeko.engine.runtime import RUNTIME
-
-# create_tool_calling_agent requires the prompt to reserve a slot for the
-# tool-call loop's scratchpad; the shared prompt specs don't have one.
-AGENT_SCRATCHPAD = MessagesPlaceholder(variable_name="agent_scratchpad")
 
 # Agents that only classify, consolidate or review — cheap turns, fast model.
 # Everything else is a specialist analyst and gets the high-effort model. The
@@ -58,13 +54,28 @@ def _to_lc_tool(tool: Any) -> Any:
     return getattr(tool, "tool", tool)
 
 
-def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> AgentExecutor:
+class _AgentCompatibilityWrapper:
+    """Keep the SDK's executor-shaped contract over a create_agent graph."""
+
+    def __init__(self, graph: Any, prompt: Any, llm: BaseChatModel, tools: list[Any]):
+        self._graph = graph
+        self.tools = tools
+        self.agent = SimpleNamespace(runnable=SimpleNamespace(steps=[prompt, llm]))
+
+    def invoke(self, input: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+        result = self._graph.invoke(input, config=config)
+        messages = result.get("messages", [])
+        output = messages[-1].content if messages else ""
+        return {**result, "output": output}
+
+
+def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Any:
     """
     Build a tool-calling agent executor from an LLM, a prompt spec and its tools.
 
     The tools are used twice, from the same declaration: their descriptions are
     rendered into the prompt's "# Ferramentas Disponiveis" section, and the tool
-    objects themselves are bound to the executor. That is what keeps the prompt
+    objects themselves are bound to the agent. That is what keeps the prompt
     from advertising a tool the agent cannot actually call.
 
     Args:
@@ -80,8 +91,9 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Agen
     prompt = build_prompt(replace(spec, tools=[_to_prompt_line(tool) for tool in tools]))
     lc_tools = [_to_lc_tool(tool) for tool in tools]
 
-    tool_calling_agent = create_tool_calling_agent(llm, lc_tools, prompt + AGENT_SCRATCHPAD)
-    return AgentExecutor(agent=tool_calling_agent, tools=lc_tools)
+    system_message = prompt.invoke({"messages": []}).messages[0]
+    graph = create_agent(llm, tools=lc_tools, system_prompt=system_message)
+    return _AgentCompatibilityWrapper(graph, prompt, llm, lc_tools)
 
 
 def create_agents(max_tokens: int | None = None) -> dict[str, Any]:
@@ -98,7 +110,7 @@ def create_agents(max_tokens: int | None = None) -> dict[str, Any]:
             flow gets more room than a chat answer.
 
     Returns:
-        dict[str, AgentExecutor]: The agents, keyed by the exact names the graph
+        dict[str, Any]: The agents, keyed by the exact names the graph
             routes by.
 
     Raises:

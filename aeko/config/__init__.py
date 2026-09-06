@@ -1,3 +1,5 @@
+"""Public configuration, messaging, and inventory APIs."""
+
 from aeko.config.aeko import Aeko
 from aeko.config.dto import (
     AekoAnalysisResponse,
