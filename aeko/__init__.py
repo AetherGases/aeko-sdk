@@ -1,6 +1,6 @@
 """Aeko SDK - the Aether multi-agent core."""
 
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 
 from aeko.config import (
     AGENT_NAMES,
@@ -14,6 +14,7 @@ from aeko.config import (
     AekoMessenger,
     AekoNotConfiguredError,
     AekoSession,
+    AekoSummaryResponse,
     AekoTool,
     AekoUser,
     AekoUserMemory,
@@ -37,6 +38,7 @@ __all__ = [
     "AekoMetrics",
     "AekoNotConfiguredError",
     "AekoSession",
+    "AekoSummaryResponse",
     "AekoTool",
     "AekoUser",
     "AekoUserMemory",

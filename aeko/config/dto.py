@@ -288,6 +288,24 @@ class AekoImprovementPlan(BaseModel):
     updated_at: datetime = Field(default_factory=_now)
 
 
+class AekoSummaryResponse(BaseModel):
+    """
+    The answer returned by `AekoMessenger.generate_summary()`.
+
+    `summary` is the only part the memory worker persists as a `user_memory`
+    description. The event tracking beside it says how the summary was produced,
+    and the API persists it somewhere else — which is why it is an envelope
+    around the text rather than another field of it.
+
+    Attributes:
+        summary: The conversation summary, ready to be written to "user_memory".
+        aeko_metrics: What this request cost and went through.
+    """
+
+    summary: str
+    aeko_metrics: AekoMetrics
+
+
 class AekoAnalysisResponse(BaseModel):
     """
     The answer returned by `AekoInventoryAnalyzer.analyze()`.
