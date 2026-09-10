@@ -8,6 +8,7 @@ from aeko.config.dto import (
     AekoMessage,
     AekoMessageResponse,
     AekoSession,
+    AekoSummaryResponse,
     AekoTool,
     AekoUser,
     AekoUserMemory,
@@ -19,6 +20,8 @@ from aeko.engine.prompts import AGENT_NAMES
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import Flow, log_failure, log_success, processing
 from aeko.config.constants import MEMORIES_LABEL, MESSENGER_LOG_MODULE, SESSION_HISTORY_USAGE
+from aeko.side_content.constants import SUMMARY_LOG_MODULE
+from aeko.side_content.summary import generate_conversation_summary
 
 LOG_MODULE = MESSENGER_LOG_MODULE
 
@@ -307,4 +310,54 @@ class AekoMessenger:
             agents_called=agents_called,
             approved=approved,
             guardrail_retries=guardrail_retries,
+        )
+
+    def generate_summary(self, messages: Sequence[AekoMessage], *,
+                         id_request: str) -> AekoSummaryResponse:
+        """
+        Summarize a conversation window through the lonely summarizer agent.
+
+        Unlike `send_message()`, this does not read or update a session, and it
+        deliberately ignores the messenger's user and memories: the Hub hands
+        over only the turns it wants condensed, in the order they were sent.
+
+        Args:
+            messages: The turns to summarize, oldest first.
+            id_request: What the API correlates this request by, echoed back in
+                the returned event tracking. Required and keyword-only for the
+                same reason as in `send_message()`.
+
+        Returns:
+            AekoSummaryResponse: The summary to persist and what producing it
+                cost.
+
+        Raises:
+            TypeError: If `id_request` is not a `str`, or if any item in
+                `messages` is not an `AekoMessage`.
+            AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
+            MalformedAgentOutputError: If the summarizer returns an empty
+                answer.
+        """
+
+        if not isinstance(id_request, str):
+            raise TypeError(
+                f"generate_summary() takes id_request as a string, "
+                f"got {type(id_request).__name__}."
+            )
+
+        for message in messages:
+            if not isinstance(message, AekoMessage):
+                raise TypeError(
+                    f"generate_summary() takes AekoMessage objects, "
+                    f"got {type(message).__name__}."
+                )
+
+        with processing(Flow.CONVERSATIONAL, SUMMARY_LOG_MODULE, id_request) as run:
+            run.item("input", f"{len(messages)} message(s)")
+
+            summary = generate_conversation_summary(messages)
+
+        return AekoSummaryResponse(
+            summary=summary,
+            aeko_metrics=run.event_tracking(),
         )
