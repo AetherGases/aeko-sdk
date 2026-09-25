@@ -29,14 +29,15 @@ class MalformedAgentOutputError(AekoError):
 
     Two things end here. An answer that does not match the shape its prompt
     demands, where the SDK has to turn it into a database document — today, the
-    continuous improvement coordinator's `AekoImprovementPlan`. And a
-    conversational turn neither the output guardrail nor the response checker
-    ever approved, which reaches its retry cap with no answer to deliver.
+    continuous improvement coordinator's `AekoImprovementPlan` and the
+    extracted `inventory` payload. And a conversational turn neither the output
+    guardrail nor the response checker ever approved, which reaches its retry
+    cap with no answer to deliver.
 
     Failing is deliberate in both cases: the alternatives are handing the API a
-    plan whose fields were guessed from prose, and handing it an empty turn it
-    would have to notice the emptiness of on its own — both persisted as if they
-    were real answers.
+    plan whose fields were guessed from prose, an inventory with invented
+    foreign keys, and handing it an empty turn it would have to notice the
+    emptiness of on its own — both persisted as if they were real answers.
     """
 
 

@@ -1,7 +1,20 @@
 """Inventory analysis API for generating improvement plans."""
 
+import json
+import re
+
+from pydantic import ValidationError
+
 from aeko.config._text import parse_sections, strip_routing_marker
-from aeko.config.dto import AekoAnalysisResponse, AekoImprovementPlan
+from aeko.config.constants import INVENTORY_ENTRY_POINT, INVENTORY_LOG_MODULE
+from aeko.config.dto import (
+    AekoAnalysisResponse,
+    AekoCatalogItem,
+    AekoCategoryCatalogItem,
+    AekoExtractedInventory,
+    AekoImprovementPlan,
+    AekoInventoryCatalogs,
+)
 from aeko.config.exceptions import MalformedAgentOutputError
 from aeko.engine._content import text_of
 from aeko.engine.graph.builder import get_app
@@ -10,20 +23,22 @@ from aeko.engine.graph.state import create_initial_state
 from aeko.engine.prompts import PLAN_SECTIONS
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import Flow, processing
-from aeko.config.constants import INVENTORY_ENTRY_POINT, INVENTORY_LOG_MODULE
 
 LOG_MODULE = INVENTORY_LOG_MODULE
 
 PLAN_FIELDS = tuple(PLAN_SECTIONS)
+
+_INVENTORY_BLOCK = re.compile(r"```inventory\s*\n(.*?)```", re.DOTALL)
 
 
 def _plan_sections_in(answer: str) -> dict[str, str]:
     """
     Read the plan sections an answer actually filled in.
 
-    Strips the routing marker itself, so the same reading applies whether the
-    answer comes from the graph's final message or straight out of the agent
-    mid-run, when the node is still deciding whether to ask for a rewrite.
+    Strips the routing marker and the extracted-inventory fence first, so the
+    same reading applies whether the answer comes from the graph's final
+    message or straight out of the agent mid-run, and so the JSON payload
+    cannot leak into `reasoning`.
 
     Args:
         answer: The coordinator's answer, with or without its routing marker.
@@ -33,7 +48,10 @@ def _plan_sections_in(answer: str) -> dict[str, str]:
             section left empty counts as never written.
     """
 
-    sections = parse_sections(strip_routing_marker(answer), PLAN_SECTIONS)
+    sections = parse_sections(
+        strip_routing_marker(_without_inventory_block(answer)),
+        PLAN_SECTIONS,
+    )
 
     return {field: text for field, text in sections.items() if text}
 
@@ -62,6 +80,126 @@ def _format_problems_in(answer: str) -> list[str]:
         for field in PLAN_FIELDS
         if field not in sections
     ]
+
+
+def _without_inventory_block(answer: str) -> str:
+    """
+    Remove the fenced inventory JSON from a coordinator answer, if present.
+
+    Args:
+        answer: The coordinator's answer.
+
+    Returns:
+        str: The answer without the ```inventory block, stripped.
+    """
+
+    match = _INVENTORY_BLOCK.search(answer)
+    if match is None:
+        return answer
+    return (answer[:match.start()] + answer[match.end():]).strip()
+
+
+def _catalog_validation_context(catalogs: AekoInventoryCatalogs) -> dict:
+    """
+    Build the Pydantic context an extracted inventory is validated against.
+
+    Args:
+        catalogs: The catalogs of the same `analyze()` call.
+
+    Returns:
+        dict: Id sets and category classifications keyed for the emission
+            validator.
+    """
+
+    return {
+        "gas_ids": {item.id for item in catalogs.gases},
+        "scope_ids": {item.id for item in catalogs.scopes},
+        "category_ids": {item.id for item in catalogs.categories},
+        "classifications": {
+            item.id: item.classification for item in catalogs.categories
+        },
+    }
+
+
+def _render_catalogs(catalogs: AekoInventoryCatalogs) -> str:
+    """
+    Render the catalogs as the prompt section inventory-flow agents read.
+
+    Args:
+        catalogs: The catalogs of this call.
+
+    Returns:
+        str: A labelled list of id + name, with category classification.
+    """
+
+    def _lines(title: str, items: list[AekoCatalogItem] | list[AekoCategoryCatalogItem]) -> list[str]:
+        rendered = [f"{title}:"]
+        for item in items:
+            if isinstance(item, AekoCategoryCatalogItem):
+                classification = (
+                    "nula" if item.classification is None else item.classification
+                )
+                rendered.append(
+                    f"- {item.id}: {item.name} (classification: {classification})"
+                )
+            else:
+                rendered.append(f"- {item.id}: {item.name}")
+        return rendered
+
+    parts = [
+        "Catálogos auxiliares vigentes. Use somente os ids listados abaixo.",
+        *_lines("Gases", catalogs.gases),
+        *_lines("Escopos", catalogs.scopes),
+        *_lines("Categorias", catalogs.categories),
+    ]
+    return "\n".join(parts)
+
+
+def _to_extracted_inventory(
+    answer: str, catalogs: AekoInventoryCatalogs
+) -> AekoExtractedInventory:
+    """
+    Read the structured inventory out of the coordinator's answer.
+
+    The payload lives in a fenced ```inventory JSON block, separate from the
+    three plan headings, so a truncated JSON object cannot take the plan
+    sections down with it.
+
+    Args:
+        answer: The coordinator's answer, already stripped of its routing marker.
+        catalogs: The catalogs of the same call, which every foreign key must
+            belong to.
+
+    Returns:
+        AekoExtractedInventory: The payload to persist to Postgres.
+
+    Raises:
+        MalformedAgentOutputError: If the block is missing, is not JSON, or
+            violates the inventory contract.
+    """
+
+    match = _INVENTORY_BLOCK.search(answer)
+    if match is None:
+        raise MalformedAgentOutputError(
+            "O Coordenador de Melhoria Contínua não devolveu o inventário "
+            "estruturado no bloco ```inventory pedido."
+        )
+
+    try:
+        payload = json.loads(match.group(1).strip())
+    except json.JSONDecodeError as exc:
+        raise MalformedAgentOutputError(
+            f"O inventário estruturado não é um JSON válido: {exc}"
+        ) from exc
+
+    try:
+        return AekoExtractedInventory.model_validate(
+            payload, context=_catalog_validation_context(catalogs)
+        )
+    except ValidationError as exc:
+        raise MalformedAgentOutputError(
+            f"O inventário estruturado viola o contrato de persistência: {exc}"
+        ) from exc
 
 
 def _to_improvement_plan(answer: str, id_external_inventory: int) -> AekoImprovementPlan:
@@ -148,18 +286,31 @@ class AekoInventoryAnalyzer:
 
         self._context = context or ""
 
-    def analyze(self, inventory: str, *, id_external_inventory: int,
-                id_request: str) -> AekoAnalysisResponse:
+    def analyze(
+        self,
+        inventory: str,
+        *,
+        id_external_inventory: int,
+        id_request: str,
+        gases: list[AekoCatalogItem | dict],
+        scopes: list[AekoCatalogItem | dict],
+        categories: list[AekoCategoryCatalogItem | dict],
+    ) -> AekoAnalysisResponse:
         """
-        Analyze a GHG inventory and return the improvement plan.
+        Analyze a GHG inventory and return the improvement plan and structured inventory.
 
         Runs with the report token cap rather than the conversational one: this
         flow writes a full report, which the chat-sized cap would truncate.
 
+        The three catalogs are the only ids the extracted inventory may cite.
+        They are validated before the graph runs: a malformed catalog is a call
+        error, not a model-output error.
+
         An answer that doesn't carry the three plan sections is sent back to the
         coordinator to be rewritten, up to `PLAN_FORMAT_MAX_RETRIES` times, from
         inside the graph — only the coordinator answers again, not the analysts
-        before it. The error below is what an exhausted retry looks like.
+        before it. A valid plan whose inventory block is missing or invalid is
+        refused the same way, without handing the caller a partial payload.
 
         Args:
             inventory: The inventory spreadsheet, rendered as Markdown.
@@ -172,20 +323,39 @@ class AekoInventoryAnalyzer:
                 the returned event tracking. Required for the same reason
                 `id_external_inventory` is: the SDK reads no database and has
                 no way to derive one.
+            gases: The gas catalog of this deployment, each item `{id, name}`.
+            scopes: The scope catalog of this deployment, each item `{id, name}`.
+            categories: The category catalog of this deployment, each item
+                `{id, name, classification}` where classification is UPSTREAM,
+                DOWNSTREAM or null.
 
         Returns:
-            AekoAnalysisResponse: The plan to persist, mirroring one document of
-                the "improvement_plan" collection, and what producing it cost.
+            AekoAnalysisResponse: The plan to persist in "improvement_plan", the
+                structured inventory aligned with Postgres, and what producing
+                them cost.
 
         Raises:
             AekoNotConfiguredError: If `Aeko.config()` hasn't been called.
+            ValidationError: If a catalog is missing fields, repeats an id, or
+                uses a classification outside the allowed set.
             MalformedAgentOutputError: If the coordinator's answer still doesn't
-                match the shape its prompt demands after every retry. Its
+                match the shape its prompt demands after every retry, or if the
+                extracted inventory is missing or violates this contract. Its
                 `aeko_metrics` carries what the failed analysis went through,
                 since there is no response left to carry it back.
         """
 
-        state = create_initial_state(inventory, company_context=self._context)
+        catalogs = AekoInventoryCatalogs.model_validate({
+            "gases": gases,
+            "scopes": scopes,
+            "categories": categories,
+        })
+
+        state = create_initial_state(
+            inventory,
+            company_context=self._context,
+            catalog_context=_render_catalogs(catalogs),
+        )
 
         with processing(Flow.REPORT, LOG_MODULE, id_request) as run:
             run.item("inventory", id_external_inventory)
@@ -209,5 +379,10 @@ class AekoInventoryAnalyzer:
             ))
 
             plan = _to_improvement_plan(answer, id_external_inventory)
+            extracted = _to_extracted_inventory(answer, catalogs)
 
-        return AekoAnalysisResponse(plan=plan, aeko_metrics=run.event_tracking())
+        return AekoAnalysisResponse(
+            plan=plan,
+            inventory=extracted,
+            aeko_metrics=run.event_tracking(),
+        )

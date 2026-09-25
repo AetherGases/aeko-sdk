@@ -6,6 +6,7 @@ end to end against a scripted chat model instead, so the suite is deterministic,
 free, and runnable without credentials.
 """
 
+import json
 from typing import Any
 
 import pytest
@@ -23,6 +24,78 @@ from aeko.engine.runtime import RUNTIME
 PERSONA_MARKER = "Voce é o agente: "
 
 DEFAULT_FAKE_RESPONSE = "Resposta simulada.\nNext agent: Nenhum"
+
+DEFAULT_GASES = [{"id": 1, "name": "CO2"}]
+DEFAULT_SCOPES = [{"id": 1, "name": "Escopo 1"}]
+DEFAULT_CATEGORIES = [
+    {"id": 1, "name": "Combustao estacionaria", "classification": None},
+    {"id": 2, "name": "Bens e servicos adquiridos", "classification": "UPSTREAM"},
+    {"id": 3, "name": "Transporte e distribuicao", "classification": "DOWNSTREAM"},
+]
+
+EMPTY_EXTRACTED_INVENTORY = {
+    "description": None,
+    "start_period": None,
+    "end_period": None,
+    "emissions": [],
+}
+
+
+def catalog_kwargs(**overrides) -> dict:
+    """
+    Keyword arguments `analyze()` now requires for the auxiliary catalogs.
+
+    Args:
+        **overrides: Replaces one or more of the default catalogs.
+
+    Returns:
+        dict: `gases`, `scopes` and `categories` ready to splat into `analyze()`.
+    """
+
+    kwargs = {
+        "gases": list(DEFAULT_GASES),
+        "scopes": list(DEFAULT_SCOPES),
+        "categories": list(DEFAULT_CATEGORIES),
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+def extracted_inventory_block(payload: dict | None = None) -> str:
+    """
+    Render an extracted inventory as the fenced JSON the coordinator is told to emit.
+
+    Args:
+        payload: The JSON object to emit. Defaults to an empty valid inventory.
+
+    Returns:
+        str: A ```inventory fenced block.
+    """
+
+    return "```inventory\n" + json.dumps(payload or EMPTY_EXTRACTED_INVENTORY) + "\n```"
+
+
+def with_extracted_inventory(answer: str, payload: dict | None = None) -> str:
+    """
+    Attach an extracted-inventory block to a coordinator answer.
+
+    Keeps a trailing `Next agent:` marker after the block when the answer has one,
+    matching the raw output the graph stores.
+
+    Args:
+        answer: The coordinator's answer, typically the three plan sections.
+        payload: Optional inventory JSON object. Defaults to an empty valid one.
+
+    Returns:
+        str: The answer with the inventory block inserted before the routing marker.
+    """
+
+    block = extracted_inventory_block(payload)
+    marker = "Next agent:"
+    if marker in answer:
+        body, rest = answer.rsplit(marker, 1)
+        return f"{body.rstrip()}\n\n{block}\n{marker}{rest}"
+    return f"{answer}\n\n{block}"
 
 
 def agent_name_from(messages: list[BaseMessage]) -> str:

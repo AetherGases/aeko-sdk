@@ -1,14 +1,19 @@
 """Aeko SDK - the Aether multi-agent core."""
 
-__version__ = "3.4.0"
+__version__ = "3.5.0"
 
 from aeko.config import (
     AGENT_NAMES,
     Aeko,
     AekoAnalysisResponse,
+    AekoCatalogItem,
+    AekoCategoryCatalogItem,
     AekoError,
+    AekoExtractedInventory,
     AekoImprovementPlan,
     AekoInventoryAnalyzer,
+    AekoInventoryCatalogs,
+    AekoInventoryEmission,
     AekoMessage,
     AekoMessageResponse,
     AekoMessenger,
@@ -29,9 +34,14 @@ __all__ = [
     "Aeko",
     "AekoAgentMetrics",
     "AekoAnalysisResponse",
+    "AekoCatalogItem",
+    "AekoCategoryCatalogItem",
     "AekoError",
+    "AekoExtractedInventory",
     "AekoImprovementPlan",
     "AekoInventoryAnalyzer",
+    "AekoInventoryCatalogs",
+    "AekoInventoryEmission",
     "AekoMessage",
     "AekoMessageResponse",
     "AekoMessenger",
