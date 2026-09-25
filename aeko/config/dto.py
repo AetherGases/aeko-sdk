@@ -1,10 +1,10 @@
 """Data transfer objects exposed by the SDK configuration layer."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import date, datetime, timezone
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from aeko.shared import AekoMetrics
 from aeko.config.constants import LOG_ONLY_FIELDS
@@ -288,6 +288,325 @@ class AekoImprovementPlan(BaseModel):
     updated_at: datetime = Field(default_factory=_now)
 
 
+class AekoCatalogItem(BaseModel):
+    """
+    One row of a gas or scope catalog sent by ms-aeko into `analyze()`.
+
+    The integer `id` is the Postgres primary key the extracted inventory must
+    reuse as a foreign key. `name` is only a label for the model to read.
+
+    Attributes:
+        id: The catalog row's id in the caller's database.
+        name: A human-readable label (common name, formula, or another wording
+            the caller chooses).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+
+
+class AekoCategoryCatalogItem(BaseModel):
+    """
+    One row of the category catalog sent by ms-aeko into `analyze()`.
+
+    `classification` decides `is_upstream` on a non-reduction emission: true
+    for UPSTREAM, false for DOWNSTREAM, and None when the classification itself
+    is null (typical of Scope 1/2 categories).
+
+    Attributes:
+        id: The catalog row's id in the caller's database.
+        name: A human-readable label.
+        classification: `UPSTREAM`, `DOWNSTREAM`, or None. An empty string is
+            not a null classification.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+    classification: Literal["UPSTREAM", "DOWNSTREAM"] | None = None
+
+
+class AekoInventoryCatalogs(BaseModel):
+    """
+    The three auxiliary catalogs a single `analyze()` call is allowed to cite.
+
+    Duplicate ids inside one catalog are a call error: the SDK would otherwise
+    have no way to tell which row an extracted foreign key referred to.
+
+    Attributes:
+        gases: Rows of the `gas` table, each with `id` and `name`.
+        scopes: Rows of the `scope` table, each with `id` and `name`.
+        categories: Rows of the `category` table, each with `id`, `name` and
+            `classification`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gases: list[AekoCatalogItem]
+    scopes: list[AekoCatalogItem]
+    categories: list[AekoCategoryCatalogItem]
+
+    @field_validator("gases", "scopes", "categories")
+    @classmethod
+    def ids_are_unique(cls, items: list) -> list:
+        """
+        Reject a catalog that lists the same id more than once.
+
+        Args:
+            items: The catalog rows being validated.
+
+        Returns:
+            list: The same rows, when every id is unique.
+
+        Raises:
+            ValueError: If two rows share an id.
+        """
+
+        ids = [item.id for item in items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("catalog ids must be unique")
+        return items
+
+
+class AekoInventoryEmission(BaseModel):
+    """
+    One extracted line destined for Postgres `emission` or `reduction`.
+
+    `is_reduction` selects the table. An emission (`false`) must cite gas,
+    scope and category ids from the catalogs of the same call, and its
+    `is_upstream` must match that category's classification. A reduction
+    (`true`) keeps `quantity_co2e` and `category` and leaves the extra fields
+    as None.
+
+    Attributes:
+        quantity_co2e: The extracted quantity. Must be >= 0 for an emission.
+        methodology_description: Optional methodology text, at most 150
+            characters. Must be None on a reduction.
+        supplier_data_percentage: Optional percentage in [0, 100]. Must be
+            None on a reduction.
+        gas: Catalog id of the gas. Required on an emission, None on a reduction.
+        scope: Catalog id of the scope. Required on an emission, None on a reduction.
+        category: Catalog id of the category. Required on both kinds of row.
+        is_upstream: Derived from the category classification on an emission;
+            None on a reduction.
+        is_reduction: False writes to `emission`; true writes to `reduction`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    quantity_co2e: float
+    methodology_description: str | None = None
+    supplier_data_percentage: float | None = None
+    gas: int | None = None
+    scope: int | None = None
+    category: int | None = None
+    is_upstream: bool | None = None
+    is_reduction: bool
+
+    @field_validator("methodology_description")
+    @classmethod
+    def methodology_fits_varchar(cls, value: str | None) -> str | None:
+        """
+        Reject a methodology longer than the Postgres VARCHAR(150).
+
+        Args:
+            value: The extracted methodology, or None when the markdown had none.
+
+        Returns:
+            str | None: The same value, when it fits.
+
+        Raises:
+            ValueError: If the string is longer than 150 characters.
+        """
+
+        if value is not None and len(value) > 150:
+            raise ValueError("methodology_description must be at most 150 characters")
+        return value
+
+    @field_validator("supplier_data_percentage")
+    @classmethod
+    def percentage_is_a_ratio_of_one_hundred(cls, value: float | None) -> float | None:
+        """
+        Reject a supplier-data percentage outside [0, 100].
+
+        Args:
+            value: The extracted percentage, or None when the markdown had none.
+
+        Returns:
+            float | None: The same value, when it is in range.
+
+        Raises:
+            ValueError: If the number is outside [0, 100].
+        """
+
+        if value is not None and not 0 <= value <= 100:
+            raise ValueError("supplier_data_percentage must be in [0, 100]")
+        return value
+
+    @model_validator(mode="after")
+    def matches_the_row_kind_and_catalogs(self, info: ValidationInfo) -> "AekoInventoryEmission":
+        """
+        Enforce emission vs reduction rules and catalog membership.
+
+        Catalog membership is checked only when the caller supplied a context
+        with `gas_ids`, `scope_ids`, `category_ids` and `classifications`,
+        which `analyze()` always does. Direct construction without that
+        context still validates the row kind (which fields may be filled).
+
+        Args:
+            info: Pydantic validation info, whose `context` may carry catalogs.
+
+        Returns:
+            AekoInventoryEmission: This row, when it is persistable.
+
+        Raises:
+            ValueError: If the row kind, ids or `is_upstream` are inconsistent.
+        """
+
+        catalogs: dict[str, Any] = info.context or {}
+
+        if self.is_reduction:
+            extras = (
+                self.methodology_description,
+                self.supplier_data_percentage,
+                self.gas,
+                self.scope,
+                self.is_upstream,
+            )
+            if any(value is not None for value in extras):
+                raise ValueError("reduction rows must leave extra fields as null")
+            if self.category is None:
+                raise ValueError("reduction rows require a category id")
+            category_ids = catalogs.get("category_ids")
+            if category_ids is not None and self.category not in category_ids:
+                raise ValueError("category id is not in the categories catalog")
+            return self
+
+        if self.quantity_co2e < 0:
+            raise ValueError("quantity_co2e must be >= 0 for an emission")
+        if self.gas is None or self.scope is None or self.category is None:
+            raise ValueError("emission rows require gas, scope and category ids")
+
+        gas_ids = catalogs.get("gas_ids")
+        scope_ids = catalogs.get("scope_ids")
+        category_ids = catalogs.get("category_ids")
+        classifications = catalogs.get("classifications")
+
+        if gas_ids is not None and self.gas not in gas_ids:
+            raise ValueError("gas id is not in the gases catalog")
+        if scope_ids is not None and self.scope not in scope_ids:
+            raise ValueError("scope id is not in the scopes catalog")
+        if category_ids is not None and self.category not in category_ids:
+            raise ValueError("category id is not in the categories catalog")
+
+        if classifications is not None:
+            classification = classifications.get(self.category)
+            if classification == "UPSTREAM":
+                expected: bool | None = True
+            elif classification == "DOWNSTREAM":
+                expected = False
+            else:
+                expected = None
+            if self.is_upstream is not expected:
+                raise ValueError("is_upstream does not match the category classification")
+
+        return self
+
+
+class AekoExtractedInventory(BaseModel):
+    """
+    The structured inventory `analyze()` returns next to the improvement plan.
+
+    This is not a Mongo document. It mirrors the Postgres `inventory` row
+    (description and period) plus the lines to persist as `emission` or
+    `reduction`. `id_inventory` and timestamps are owned by the microservices
+    that write the tables, so they are not here.
+
+    Attributes:
+        description: Maps to `inventory.description`. At most 150 characters.
+        start_period: ISO 8601 `YYYY-MM-DD`, mapping to
+            `inventory.inventorying_period_start`.
+        end_period: ISO 8601 `YYYY-MM-DD`, mapping to
+            `inventory.inventorying_period_end`. Must be on or after
+            `start_period` when both are present.
+        emissions: Lines for `emission` (`is_reduction=false`) or `reduction`
+            (`is_reduction=true`). An empty list is valid when the markdown
+            had no extractable `quantity_co2e`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = None
+    start_period: str | None = None
+    end_period: str | None = None
+    emissions: list[AekoInventoryEmission] = Field(default_factory=list)
+
+    @field_validator("description")
+    @classmethod
+    def description_fits_varchar(cls, value: str | None) -> str | None:
+        """
+        Reject a description longer than the Postgres VARCHAR(150).
+
+        Args:
+            value: The extracted description, or None.
+
+        Returns:
+            str | None: The same value, when it fits.
+
+        Raises:
+            ValueError: If the string is longer than 150 characters.
+        """
+
+        if value is not None and len(value) > 150:
+            raise ValueError("description must be at most 150 characters")
+        return value
+
+    @field_validator("start_period", "end_period")
+    @classmethod
+    def period_is_iso_date(cls, value: str | None) -> str | None:
+        """
+        Reject a period that is not a calendar date `YYYY-MM-DD`.
+
+        Args:
+            value: The extracted period, or None.
+
+        Returns:
+            str | None: The same value, when it is an ISO date.
+
+        Raises:
+            ValueError: If the string is not `YYYY-MM-DD`.
+        """
+
+        if value is None:
+            return value
+        if len(value) != 10:
+            raise ValueError("periods must be ISO 8601 dates (YYYY-MM-DD)")
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("periods must be ISO 8601 dates (YYYY-MM-DD)") from exc
+        return value
+
+    @model_validator(mode="after")
+    def end_is_not_before_start(self) -> "AekoExtractedInventory":
+        """
+        Reject a period whose end precedes its start.
+
+        Returns:
+            AekoExtractedInventory: This inventory, when the period is ordered.
+
+        Raises:
+            ValueError: If both dates are present and `end_period` is earlier.
+        """
+
+        if self.start_period and self.end_period and self.end_period < self.start_period:
+            raise ValueError("end_period must be on or after start_period")
+        return self
+
+
 class AekoSummaryResponse(BaseModel):
     """
     The answer returned by `AekoMessenger.generate_summary()`.
@@ -311,20 +630,20 @@ class AekoAnalysisResponse(BaseModel):
     The answer returned by `AekoInventoryAnalyzer.analyze()`.
 
     `plan` is the only part that belongs in the "improvement_plan" collection:
-    it is exactly one document of it, ready to be written. The event tracking
-    beside it says how the analysis reached that plan, and the API persists it
-    somewhere else — which is why it is an envelope around the plan rather than
-    another field of it. A document carrying its own latency would be a
-    document the collection never described.
+    it is exactly one document of it, ready to be written. `inventory` is the
+    sibling payload for Postgres (`inventory` plus `emission`/`reduction`
+    lines) and is not a Mongo document. The event tracking beside both says
+    how the analysis reached them, and the API persists it somewhere else.
 
     This mirrors what `AekoMessageResponse` already does for a chat turn, so
-    both public flows hand back the same two things: what to store, and what it
-    cost to produce.
+    both public flows hand back what to store and what it cost to produce.
 
     Attributes:
         plan: The improvement plan, mirroring "improvement_plan".
+        inventory: The structured inventory aligned with the Postgres schema.
         aeko_metrics: What this request cost and went through.
     """
 
     plan: AekoImprovementPlan
+    inventory: AekoExtractedInventory
     aeko_metrics: AekoMetrics

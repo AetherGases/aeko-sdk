@@ -16,7 +16,13 @@ from pydantic import ValidationError
 
 from aeko import (
     AekoAgentMetrics,
+    AekoAnalysisResponse,
+    AekoCatalogItem,
+    AekoCategoryCatalogItem,
+    AekoExtractedInventory,
     AekoImprovementPlan,
+    AekoInventoryCatalogs,
+    AekoInventoryEmission,
     AekoMessage,
     AekoMessageResponse,
     AekoMetrics,
@@ -303,3 +309,234 @@ def test_the_run_metadata_stays_out_of_the_persisted_message():
 
     assert "agents_called" not in response.message.model_dump()
     assert "approved" not in response.message.model_dump()
+
+
+# --- auxiliary catalogs (FR-002, FR-003) ---------------------------------
+
+
+def test_a_gas_or_scope_catalog_item_is_an_id_and_a_name():
+    item = AekoCatalogItem(id=1, name="CO2")
+
+    assert item.model_dump() == {"id": 1, "name": "CO2"}
+
+
+def test_a_category_catalog_item_carries_an_optional_classification():
+    upstream = AekoCategoryCatalogItem(
+        id=2, name="Bens adquiridos", classification="UPSTREAM"
+    )
+    unscoped = AekoCategoryCatalogItem(id=1, name="Combustao")
+
+    assert upstream.classification == "UPSTREAM"
+    assert unscoped.classification is None
+
+
+@pytest.mark.parametrize("classification", ["SIDEWAYS", "", "upstream"])
+def test_a_category_classification_outside_the_allowed_set_is_rejected(classification):
+    with pytest.raises(ValidationError):
+        AekoCategoryCatalogItem(id=1, name="X", classification=classification)
+
+
+def test_duplicate_catalog_ids_are_rejected_at_the_boundary():
+    with pytest.raises(ValidationError):
+        AekoInventoryCatalogs.model_validate({
+            "gases": [{"id": 1, "name": "CO2"}, {"id": 1, "name": "CH4"}],
+            "scopes": [{"id": 1, "name": "Escopo 1"}],
+            "categories": [{"id": 1, "name": "Combustao", "classification": None}],
+        })
+
+
+def test_a_catalog_item_missing_id_or_name_is_rejected():
+    with pytest.raises(ValidationError):
+        AekoCatalogItem.model_validate({"name": "CO2"})
+
+    with pytest.raises(ValidationError):
+        AekoCatalogItem.model_validate({"id": 1})
+
+
+def test_an_empty_catalog_is_accepted_at_the_boundary():
+    catalogs = AekoInventoryCatalogs(gases=[], scopes=[], categories=[])
+
+    assert catalogs.gases == []
+
+
+# --- extracted inventory (FR-005 .. FR-010, NFR-001 .. NFR-003) ----------
+
+
+CATALOG_CONTEXT = {
+    "gas_ids": {1},
+    "scope_ids": {1},
+    "category_ids": {1, 2, 3},
+    "classifications": {1: None, 2: "UPSTREAM", 3: "DOWNSTREAM"},
+}
+
+
+def _emission(**overrides) -> dict:
+    row = {
+        "quantity_co2e": 1200.0,
+        "methodology_description": None,
+        "supplier_data_percentage": None,
+        "gas": 1,
+        "scope": 1,
+        "category": 1,
+        "is_upstream": None,
+        "is_reduction": False,
+    }
+    row.update(overrides)
+    return row
+
+
+def _inventory(**overrides) -> dict:
+    payload = {
+        "description": "Inventario 2023",
+        "start_period": "2023-01-01",
+        "end_period": "2023-12-31",
+        "emissions": [_emission()],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_an_extracted_inventory_has_exactly_description_period_and_emissions():
+    parsed = AekoExtractedInventory.model_validate(
+        _inventory(), context=CATALOG_CONTEXT
+    )
+
+    assert set(parsed.model_dump()) == {
+        "description", "start_period", "end_period", "emissions",
+    }
+
+
+def test_an_emission_row_has_exactly_the_contracted_fields():
+    parsed = AekoInventoryEmission.model_validate(_emission(), context=CATALOG_CONTEXT)
+
+    assert set(parsed.model_dump()) == {
+        "quantity_co2e",
+        "methodology_description",
+        "supplier_data_percentage",
+        "gas",
+        "scope",
+        "category",
+        "is_upstream",
+        "is_reduction",
+    }
+
+
+def test_a_reduction_row_keeps_only_quantity_and_category():
+    parsed = AekoInventoryEmission.model_validate(
+        _emission(
+            is_reduction=True,
+            gas=None,
+            scope=None,
+            is_upstream=None,
+            category=2,
+            quantity_co2e=-10.0,
+        ),
+        context=CATALOG_CONTEXT,
+    )
+
+    assert parsed.gas is None
+    assert parsed.scope is None
+    assert parsed.is_upstream is None
+    assert parsed.methodology_description is None
+    assert parsed.supplier_data_percentage is None
+    assert parsed.category == 2
+
+
+def test_a_reduction_with_extra_fields_filled_is_rejected():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(is_reduction=True, gas=1, scope=None, category=2),
+            context=CATALOG_CONTEXT,
+        )
+
+
+def test_an_emission_id_absent_from_the_catalog_is_rejected():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(_emission(gas=99), context=CATALOG_CONTEXT)
+
+
+def test_is_upstream_must_follow_the_category_classification():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(category=2, is_upstream=False),
+            context=CATALOG_CONTEXT,
+        )
+
+    parsed = AekoInventoryEmission.model_validate(
+        _emission(category=2, is_upstream=True),
+        context=CATALOG_CONTEXT,
+    )
+    assert parsed.is_upstream is True
+
+
+def test_a_null_classification_requires_null_is_upstream():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(category=1, is_upstream=True),
+            context=CATALOG_CONTEXT,
+        )
+
+
+def test_an_emission_quantity_cannot_be_negative():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(quantity_co2e=-1.0), context=CATALOG_CONTEXT
+        )
+
+
+def test_supplier_data_percentage_must_stay_inside_zero_to_one_hundred():
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(supplier_data_percentage=101.0), context=CATALOG_CONTEXT
+        )
+
+
+def test_description_and_methodology_cannot_exceed_one_hundred_and_fifty_characters():
+    too_long = "x" * 151
+
+    with pytest.raises(ValidationError):
+        AekoExtractedInventory.model_validate(
+            _inventory(description=too_long), context=CATALOG_CONTEXT
+        )
+
+    with pytest.raises(ValidationError):
+        AekoInventoryEmission.model_validate(
+            _emission(methodology_description=too_long), context=CATALOG_CONTEXT
+        )
+
+
+def test_periods_must_be_iso_dates_and_end_cannot_precede_start():
+    with pytest.raises(ValidationError):
+        AekoExtractedInventory.model_validate(
+            _inventory(start_period="01/01/2023"), context=CATALOG_CONTEXT
+        )
+
+    with pytest.raises(ValidationError):
+        AekoExtractedInventory.model_validate(
+            _inventory(start_period="2023-12-31", end_period="2023-01-01"),
+            context=CATALOG_CONTEXT,
+        )
+
+
+def test_an_empty_emissions_list_is_valid():
+    parsed = AekoExtractedInventory.model_validate(
+        _inventory(emissions=[]), context=CATALOG_CONTEXT
+    )
+
+    assert parsed.emissions == []
+
+
+def test_an_analysis_response_carries_plan_inventory_and_metrics():
+    plan = AekoImprovementPlan(
+        id_external_inventory=502, defined_problem="p", method="m", reasoning="r"
+    )
+    inventory = AekoExtractedInventory.model_validate(
+        _inventory(emissions=[]), context=CATALOG_CONTEXT
+    )
+    response = AekoAnalysisResponse(
+        plan=plan, inventory=inventory, aeko_metrics=make_metrics()
+    )
+
+    dumped = response.model_dump()
+    assert set(dumped) == {"plan", "inventory", "aeko_metrics"}
+    assert "inventory" not in dumped["plan"]

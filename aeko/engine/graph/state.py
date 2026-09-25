@@ -96,10 +96,11 @@ class AetherGraphState(MessagesState):
     response_check_retries: int
     response_check_approved: bool
     company_context: str
+    catalog_context: str
 
 
 def create_initial_state(initial_question: str, company_context: str = "",
-                         history: str = "") -> AetherGraphState:
+                         history: str = "", catalog_context: str = "") -> AetherGraphState:
     """
     Build the initial graph state for a new conversation.
 
@@ -111,6 +112,9 @@ def create_initial_state(initial_question: str, company_context: str = "",
             its conversational context. The SDK is consumed by an API that owns
             persistence, so the caller is the one that knows how much of it is
             worth replaying (see `AekoMessenger._history_from`).
+        catalog_context: Optional rendering of the gas, scope and category
+            catalogs of an `analyze()` call. Empty on the conversational flow,
+            which must not see those catalogs.
 
     Returns:
         AetherGraphState: A fully-populated initial state with empty defaults.
@@ -134,4 +138,5 @@ def create_initial_state(initial_question: str, company_context: str = "",
         response_check_retries=0,
         response_check_approved=False,
         company_context=company_context,
+        catalog_context=catalog_context,
     )

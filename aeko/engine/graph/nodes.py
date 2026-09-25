@@ -5,6 +5,7 @@ from langchain_core.runnables import RunnableConfig
 
 from aeko.engine._content import text_of
 from aeko.engine.graph.state import AetherGraphState, NextAgent
+from aeko.engine.prompts import INVENTORY_PAYLOAD_INSTRUCTIONS
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import agent_call
 
@@ -90,6 +91,10 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     company_context = state.get("company_context") or ""
     if company_context:
         parts.append(f"Contexto da empresa/usuário:\n{company_context}")
+
+    catalog_context = state.get("catalog_context") or ""
+    if catalog_context:
+        parts.append(catalog_context)
 
     # Replayed whole: whoever owns the conversation is the one that decides how
     # many turns are worth replaying, and renders them (see `SESSION_HISTORY_USAGE`).
@@ -222,6 +227,32 @@ def _build_format_retry_message(state: AetherGraphState, answer: str,
     ]
 
     return HumanMessage(content="\n\n".join(parts))
+
+
+def _with_inventory_payload_instructions(
+    message: HumanMessage, state: AetherGraphState
+) -> HumanMessage:
+    """
+    Append the structured-inventory instructions when this run has catalogs.
+
+    Only the inventory flow supplies `catalog_context`. The chat coordinator
+    must keep answering in the three plan sections alone.
+
+    Args:
+        message: The isolated handoff already built for the coordinator.
+        state: The current graph state.
+
+    Returns:
+        HumanMessage: The same message, with extraction instructions appended
+            when catalogs are present.
+    """
+
+    if not (state.get("catalog_context") or ""):
+        return message
+
+    return HumanMessage(
+        content=f"{message.content}\n\n{INVENTORY_PAYLOAD_INSTRUCTIONS}"
+    )
 
 
 def _invoke_agent(agent_name: str, message: HumanMessage,
@@ -547,7 +578,7 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
     validate = configurable.get("validate_answer")
     max_tokens = _max_tokens_from(config)
 
-    message = _build_context_message(state)
+    message = _with_inventory_payload_instructions(_build_context_message(state), state)
 
     for _ in range(PLAN_FORMAT_MAX_RETRIES + 1):
         output, next_agent = _invoke_agent(agent_name, message, max_tokens)
@@ -556,7 +587,9 @@ def _coordenador_melhoria_node(state: AetherGraphState, config: RunnableConfig |
         if not problems:
             break
 
-        message = _build_format_retry_message(state, output, problems)
+        message = _with_inventory_payload_instructions(
+            _build_format_retry_message(state, output, problems), state
+        )
 
     update = {
         "previous_agents": {agent_name: output},

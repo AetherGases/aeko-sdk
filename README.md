@@ -254,10 +254,14 @@ analyzer = AekoInventoryAnalyzer()
 analyzer.set_context("Last report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
 
 analysis = analyzer.analyze(
-    inventory_markdown, id_external_inventory=502, id_request="req-8a32"
+    inventory_markdown, id_external_inventory=502, id_request="req-8a32",
+    gases=[{"id": 1, "name": "CO2"}],
+    scopes=[{"id": 1, "name": "Scope 1"}],
+    categories=[{"id": 1, "name": "Stationary combustion", "classification": None}],
 )
 db.improvement_plan.insert_one(analysis.plan.model_dump(by_alias=True, exclude={"id"}))
 db.aeko_metrics.insert_one(analysis.aeko_metrics.model_dump())
+# `analysis.inventory` is the Postgres payload (description, period, emission/reduction lines).
 ```
 
 ---
@@ -463,22 +467,31 @@ analyzer = AekoInventoryAnalyzer()
 analyzer.set_context("2025 report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
 
 analysis = analyzer.analyze(
-    inventory_markdown, id_external_inventory=502, id_request="req-8a32"
+    inventory_markdown, id_external_inventory=502, id_request="req-8a32",
+    gases=gases, scopes=scopes, categories=categories,
 )
 plan = analysis.plan
+inventory = analysis.inventory
 ```
 
 `analyze()` expects the inventory **rendered as Markdown** — a table is the natural shape.
-It runs with `report_max_tokens` instead of the chat cap, since this flow writes a full
+It also requires the three auxiliary catalogs of that deployment, keyword-only:
+`gases`, `scopes` and `categories`. Each gas/scope item is `{id, name}`; each category
+item is `{id, name, classification}` where classification is `UPSTREAM`, `DOWNSTREAM`
+or `null`. The SDK never reads Postgres, so those ids cannot be derived here. It runs
+with `report_max_tokens` instead of the chat cap, since this flow writes a full
 report that the chat-sized cap would truncate. `id_external_inventory` is what ties the
-resulting plan back to the inventory; the SDK never reads your database, so it cannot be
-derived here, and neither can `id_request` — both are required and keyword-only.
+resulting plan back to the inventory; neither it nor `id_request` can be derived here —
+both are required and keyword-only.
 
-It returns an `AekoAnalysisResponse`, an envelope of two things: `plan`, the document to
-persist, and `aeko_metrics`, what producing it cost (see
-[Event tracking](#5-event-tracking)). The metrics are an envelope field rather than a field
-of the plan because the `improvement_plan` collection has no column for a latency — a plan
-carrying its own runtime would be a document the collection never described.
+It returns an `AekoAnalysisResponse`, an envelope of three things: `plan`, the Mongo
+document to persist; `inventory`, the structured payload aligned with Postgres
+(`description`/`start_period`/`end_period` plus `emissions` lines); and `aeko_metrics`,
+what producing them cost (see [Event tracking](#5-event-tracking)). The metrics stay
+out of `plan` because the `improvement_plan` collection has no column for a latency.
+`inventory` is not a Mongo document: each line with `is_reduction=false` is an
+`emission` row, and `is_reduction=true` is a `reduction` row, using the catalog ids
+from the same call as foreign keys.
 
 `analysis.plan` is an `AekoImprovementPlan`, mirroring one document of the collection:
 
@@ -509,9 +522,12 @@ headings, and the SDK reads them straight back out:
 Headings rather than a JSON object, for the same reason the agents route on a literal
 `Next agent:` line: this flow runs with the report token cap, and a truncated JSON object
 is unparseable and costs the whole plan, while a truncated last section still yields the
-ones written before it. Only those three headings delimit a section, so a subtitle the
-agent writes mid-answer never cuts its own text short — and case and accents are ignored
-when matching them, so `## RACIOCINIO` is read as `## Raciocínio`.
+ones written before it. That truncation argument applies to the **plan in sections**, not
+to `inventory`: the structured payload is a separate ```inventory JSON block after the
+three headings, and a missing or invalid block raises `MalformedAgentOutputError` the
+same way a missing plan section does. Only those three headings delimit a plan section,
+so a subtitle the agent writes mid-answer never cuts its own text short — and case and
+accents are ignored when matching them, so `## RACIOCINIO` is read as `## Raciocínio`.
 
 An answer that misses a section is **sent back to the coordinator to be rewritten**, with
 the missing headings named and the original request attached, up to four times
@@ -519,8 +535,9 @@ the missing headings named and the original request attached, up to four times
 coordinator — the inventory, pollutant and green gas analysts already ran, and their
 findings stay in the state. If the format never comes, `analyze()` raises
 `MalformedAgentOutputError` rather than padding the plan with guesses: the SDK will not
-hand you a plan whose fields it invented. The model is also never given a say in `_id` or
-`updated_at` — only the three content fields are read back from it.
+hand you a plan whose fields it invented. The same error is raised when `inventory` is
+missing or cites a catalog id that was not in the call. The model is also never given a
+say in `_id` or `updated_at` — only the three content fields are read back from it.
 
 Budget for it: a plan that takes every retry costs five coordinator calls at the report
 token cap, on top of the analysts. A well-formed answer costs exactly one.
@@ -577,7 +594,8 @@ carry the metrics — so they are attached to the exception instead:
 
 ```python
 try:
-    analysis = analyzer.analyze(inventory, id_external_inventory=502, id_request=rid)
+    analysis = analyzer.analyze(inventory, id_external_inventory=502, id_request=rid,
+                                gases=gases, scopes=scopes, categories=categories)
 except AekoError as exc:
     if exc.aeko_metrics:                      # None for errors raised outside a request
         db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
@@ -702,6 +720,9 @@ class InventoryRequest(BaseModel):
     id_external_inventory: int
     request_id: str
     previous_report: str | None = None
+    gases: list[dict]
+    scopes: list[dict]
+    categories: list[dict]
 
 
 @app.post("/inventory")
@@ -716,6 +737,9 @@ def inventory(body: InventoryRequest):
             body.inventory_markdown,
             id_external_inventory=body.id_external_inventory,
             id_request=body.request_id,
+            gases=body.gases,
+            scopes=body.scopes,
+            categories=body.categories,
         )
     except AekoError as exc:
         # A failed analysis has no response to carry its metrics — the exception does.
@@ -890,7 +914,7 @@ Everything below is importable directly from `aeko`.
 | --- | --- |
 | *constructor* | `AekoInventoryAnalyzer()` |
 | `set_context` | `set_context(context: str) -> None` |
-| `analyze` | `analyze(inventory: str, *, id_external_inventory: int, id_request: str) -> AekoAnalysisResponse` |
+| `analyze` | `analyze(inventory: str, *, id_external_inventory: int, id_request: str, gases: list, scopes: list, categories: list) -> AekoAnalysisResponse` |
 
 **Data objects.** Every DTO that crosses the API boundary is a Pydantic model mirroring one
 MongoDB collection, field for field:
@@ -907,9 +931,12 @@ MongoDB collection, field for field:
 back — `_id` included, under that exact name — so the hand-off is lossless in both
 directions.
 
-`AekoMessageResponse` (the turn plus the run's metadata), `AekoAnalysisResponse` (the plan
-plus the run's metadata), `AekoMetrics`, `AekoAgentMetrics` and `AekoTool` are SDK-only and
-mirror no collection. The two `*Metrics` models are plain Pydantic models — persist them
+`AekoMessageResponse` (the turn plus the run's metadata), `AekoAnalysisResponse` (the plan,
+the structured `inventory` for Postgres, and the run's metadata), `AekoExtractedInventory`,
+`AekoInventoryEmission`, `AekoCatalogItem`, `AekoCategoryCatalogItem`, `AekoInventoryCatalogs`,
+`AekoMetrics`, `AekoAgentMetrics` and `AekoTool` are SDK-only and mirror no Mongo collection.
+The catalog and extracted-inventory models mirror the Postgres contract of a call, not a
+collection the SDK writes. The two `*Metrics` models are plain Pydantic models — persist them
 wherever your telemetry lives; the SDK has no opinion on the collection's name.
 
 The identifiers (`_id`, `id_external_user`, `id_user`, `id_external_inventory`) and
@@ -1015,7 +1042,8 @@ db.aeko_metrics.insert_one(resposta.aeko_metrics.model_dump())
 
 analisador = AekoInventoryAnalyzer()
 analise = analisador.analyze(inventario_em_markdown, id_external_inventory=502,
-                             id_request="req-8a32")
+                             id_request="req-8a32", gases=gases, scopes=scopes,
+                             categories=categories)
 db.improvement_plan.insert_one(analise.plan.model_dump(by_alias=True, exclude={"id"}))
 db.aeko_metrics.insert_one(analise.aeko_metrics.model_dump())
 ```

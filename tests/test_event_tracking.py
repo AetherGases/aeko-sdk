@@ -32,6 +32,7 @@ from aeko import (
 )
 from aeko.config.exceptions import MalformedAgentOutputError
 from aeko.engine.prompts import PLAN_SECTIONS
+from tests.conftest import catalog_kwargs, with_extracted_inventory
 
 from tests.conftest import FakeChatModel, agent_name_from
 
@@ -48,6 +49,7 @@ REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
 QUESTION = "O que e hidrogenio verde?"
 
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
+CATALOGS = catalog_kwargs()
 
 # A chat turn that ends at the FAQ: two agents, one answer.
 CHAT_FLOW = {
@@ -98,7 +100,9 @@ def as_sections(fields: dict[str, str]) -> str:
 INVENTORY_FLOW = {
     "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
     "Analista de Poluentes": "Combustao dominante.\nNext agent: Orquestrador",
-    "Coordenador de Melhoria Contínua": as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum",
+    "Coordenador de Melhoria Contínua": with_extracted_inventory(
+        as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"
+    ),
 }
 
 # A report whose coordinator never writes the requested sections, which is what
@@ -282,7 +286,7 @@ def test_a_chat_response_carries_its_event_tracking(chat):
 
 def test_an_analysis_carries_both_the_plan_and_its_event_tracking(report):
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert isinstance(response, AekoAnalysisResponse)
@@ -296,7 +300,7 @@ def test_both_flows_echo_the_request_id_back(chat, report):
         QUESTION, make_session(), id_request=REQUEST_ID
     )
     analyzed = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert answered.aeko_metrics.id_request == REQUEST_ID
@@ -319,7 +323,7 @@ def test_the_event_tracking_stays_out_of_the_persisted_documents(chat, report):
     session = make_session()
     answered = chat(CHAT_FLOW).send_message(QUESTION, session, id_request=REQUEST_ID)
     analyzed = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     # One entry of "session.messages" and one "improvement_plan" document,
@@ -342,7 +346,7 @@ def test_a_chat_request_is_tracked_as_conversational(chat):
 
 def test_a_report_request_is_tracked_as_analytical(report):
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert response.aeko_metrics.flow == "analytical"
@@ -396,7 +400,7 @@ def test_an_agent_called_more_than_once_is_listed_once_per_call(chat):
 
 def test_a_report_lists_the_analysts_it_entered_through(report):
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     called = [agent.name for agent in response.aeko_metrics.used_agents]
@@ -523,7 +527,7 @@ def test_the_response_checker_is_accounted_for_like_any_other_agent(chat):
 def test_a_failed_analysis_carries_its_event_tracking_on_the_exception(report):
     with pytest.raises(MalformedAgentOutputError) as raised:
         report(MALFORMED_INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
         )
 
     tracking = raised.value.aeko_metrics
@@ -538,7 +542,7 @@ def test_a_failed_analysis_carries_its_event_tracking_on_the_exception(report):
 def test_the_event_tracking_of_a_failed_request_still_lists_what_it_ran(report):
     with pytest.raises(MalformedAgentOutputError) as raised:
         report(MALFORMED_INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
         )
 
     tracking = raised.value.aeko_metrics
