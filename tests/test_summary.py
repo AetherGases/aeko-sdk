@@ -78,8 +78,8 @@ def summary_messenger(configured, use_fake_llm):
     return _build
 
 
-def test_the_sdk_version_is_3_5_0():
-    assert aeko.__version__ == "3.5.0"
+def test_the_sdk_version_is_3_5_1():
+    assert aeko.__version__ == "3.5.1"
 
 
 def test_aeko_summary_response_is_exported():
