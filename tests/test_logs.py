@@ -27,6 +27,7 @@ from aeko.config.exceptions import (
     UnknownAgentError,
 )
 from aeko.engine.prompts import PLAN_SECTIONS
+from tests.conftest import catalog_kwargs, with_extracted_inventory
 from aeko.shared import (
     BLUE,
     ITEM_PREFIX,
@@ -57,6 +58,7 @@ INVENTORY_ID = 502
 REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
 
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
+CATALOGS = catalog_kwargs()
 
 QUESTION = "O que e hidrogenio verde?"
 
@@ -103,7 +105,9 @@ def as_sections(fields: dict[str, str]) -> str:
 INVENTORY_FLOW = {
     "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
     "Analista de Poluentes": "Combustao dominante.\nNext agent: Orquestrador",
-    "Coordenador de Melhoria Contínua": as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum",
+    "Coordenador de Melhoria Contínua": with_extracted_inventory(
+        as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"
+    ),
 }
 
 # A report run whose coordinator never writes the requested sections, which is
@@ -459,7 +463,7 @@ def test_a_chat_request_writes_exactly_one_record(logs, chat):
 
 def test_a_report_request_writes_exactly_one_record(logs, report):
     report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert logs.one("inventory")
@@ -544,7 +548,7 @@ def test_an_agent_called_more_than_once_is_listed_once_per_call(logs, chat):
 
 def test_a_report_request_lists_its_inventory_and_input(logs, report):
     report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     record = logs.one("inventory")
@@ -565,7 +569,7 @@ def test_a_conversational_request_is_light_blue(logs, chat):
 
 def test_a_report_request_is_dark_blue(logs, report):
     report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert logs.one("inventory").color == BLUE
@@ -657,7 +661,7 @@ def test_a_failed_request_still_lists_what_it_went_through(logs, report):
     with pytest.raises(MalformedAgentOutputError):
         report(MALFORMED_INVENTORY_FLOW).analyze(
             INVENTORY_MD, id_external_inventory=INVENTORY_ID,
-            id_request=REQUEST_ID,
+            id_request=REQUEST_ID, **CATALOGS,
         )
 
     record = logs.one("inventory")
@@ -789,7 +793,7 @@ def test_the_two_flows_are_distinguishable_in_one_stream(logs, use_fake_llm):
 
     AekoMessenger(make_user()).send_message(QUESTION, make_session(), id_request=REQUEST_ID)
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     conversational = logs.one("messenger")

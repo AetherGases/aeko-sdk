@@ -1,6 +1,7 @@
 from .builder import PromptSpec, build_prompt
 from .continuous_improvement_coordinator import (
     CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
+    INVENTORY_PAYLOAD_INSTRUCTIONS,
     PLAN_SECTIONS,
 )
 from .faq import FAQ_SPEC
@@ -42,6 +43,7 @@ __all__ = [
     "CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC",
     "FAQ_SPEC",
     "GREEN_GASES_ANALYST_SPEC",
+    "INVENTORY_PAYLOAD_INSTRUCTIONS",
     "ORCHESTRATOR_SPEC",
     "OUTPUT_GUARDRAIL_SPEC",
     "PLAN_SECTIONS",

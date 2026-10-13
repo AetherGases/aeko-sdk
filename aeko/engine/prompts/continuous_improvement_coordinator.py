@@ -26,6 +26,23 @@ _SECTION_TEMPLATE = "\n\n".join(f"## {label}\n<texto>" for label in PLAN_SECTION
 # heading is the same idea as the graph's own "Next agent: " line (see
 # `_invoke_agent` in aeko/engine/graph/nodes.py) — a literal marker the SDK
 # looks for, not a schema the model has to serialize without a single slip.
+INVENTORY_PAYLOAD_INSTRUCTIONS = (
+    "Após as três seções do plano de melhoria, emita o inventário extraído em um único "
+    "bloco fenced no formato exato abaixo, com a linguagem inventory:\n"
+    "```inventory\n"
+    "{\"description\": null, \"start_period\": null, \"end_period\": null, \"emissions\": []}\n"
+    "```\n"
+    "O objeto JSON tem as chaves description, start_period, end_period e emissions. "
+    "Cada item de emissions tem quantity_co2e, methodology_description, "
+    "supplier_data_percentage, gas, scope, category, is_upstream e is_reduction. "
+    "Use somente os ids listados nos catálogos auxiliares. Não invente valores "
+    "ausentes do markdown: use null. Não inclua id_inventory nem timestamps. "
+    "is_upstream deve ser true se a categoria for UPSTREAM, false se DOWNSTREAM, "
+    "e null se a classificação for nula. Se is_reduction for true, preencha "
+    "quantity_co2e e category e deixe os demais campos extras como null. "
+    "O bloco ```inventory é a única exceção à regra de não usar blocos de código."
+)
+
 CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC = PromptSpec(
     agent="Coordenador de Melhoria Contínua",
     scope=(

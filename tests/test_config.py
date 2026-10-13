@@ -30,6 +30,7 @@ from aeko.engine.runtime import (
     DEFAULT_REPORT_MAX_TOKENS,
     RUNTIME,
 )
+from tests.conftest import catalog_kwargs, with_extracted_inventory
 
 API_KEY = "fake-api-key"
 
@@ -105,12 +106,13 @@ def as_sections(fields: dict[str, str]) -> str:
 INVENTORY_FLOW = {
     "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
     "Analista de Poluentes": "Combustao dominante.\nNext agent: Orquestrador",
-    "Coordenador de Melhoria Contínua": (
+    "Coordenador de Melhoria Contínua": with_extracted_inventory(
         as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"
     ),
 }
 
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
+CATALOGS = catalog_kwargs()
 
 # Three of them on purpose: the objective is *every* memory reaching the prompt,
 # so a rendering that silently kept only the first (or only the most recent)
@@ -826,7 +828,9 @@ def _coordinator_answers(answer: str) -> dict[str, str]:
 
     return {
         **INVENTORY_FLOW,
-        "Coordenador de Melhoria Contínua": f"{answer}\nNext agent: Nenhum",
+        "Coordenador de Melhoria Contínua": with_extracted_inventory(
+            f"{answer}\nNext agent: Nenhum"
+        ),
     }
 
 
@@ -834,8 +838,10 @@ def test_analyze_returns_an_improvement_plan(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert isinstance(plan, AekoImprovementPlan)
@@ -848,15 +854,19 @@ def test_the_analyzed_inventory_must_be_named(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     with pytest.raises(TypeError):
-        AekoInventoryAnalyzer().analyze(INVENTORY_MD, INVENTORY_ID, id_request=REQUEST_ID)
+        AekoInventoryAnalyzer().analyze(
+            INVENTORY_MD, INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        )
 
 
 def test_the_plan_is_tied_to_the_analyzed_inventory(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.id_external_inventory == INVENTORY_ID
@@ -868,8 +878,10 @@ def test_the_plan_mirrors_the_collection(configured, use_fake_llm):
     use_fake_llm(INVENTORY_FLOW)
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert set(plan.model_dump(by_alias=True)) == {
@@ -884,8 +896,10 @@ def test_the_model_cannot_smuggle_fields_into_the_plan(configured, use_fake_llm)
     ))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.id is None
@@ -897,8 +911,10 @@ def test_the_sections_are_read_whatever_order_they_come_in(configured, use_fake_
     use_fake_llm(_coordinator_answers(as_sections(reversed_fields)))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
@@ -911,8 +927,10 @@ def test_anything_written_before_the_first_section_is_dropped(configured, use_fa
     ))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.defined_problem == PLAN_FIELDS["defined_problem"]
@@ -923,8 +941,10 @@ def test_a_heading_inside_a_section_does_not_cut_it_short(configured, use_fake_l
     use_fake_llm(_coordinator_answers(as_sections({**PLAN_FIELDS, "method": method})))
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.method == method, "so os titulos pedidos separam secoes"
@@ -935,8 +955,10 @@ def test_an_answer_in_prose_is_refused(configured, use_fake_llm):
 
     with pytest.raises(MalformedAgentOutputError):
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
             id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
 
@@ -947,8 +969,10 @@ def test_an_incomplete_plan_is_refused(configured, use_fake_llm, missing):
 
     with pytest.raises(MalformedAgentOutputError) as exc:
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
             id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
     assert missing in str(exc.value), "o erro deve dizer qual campo faltou"
@@ -960,8 +984,10 @@ def test_a_section_left_empty_is_refused(configured, use_fake_llm, empty):
 
     with pytest.raises(MalformedAgentOutputError) as exc:
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
             id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
     assert empty in str(exc.value)
@@ -978,13 +1004,15 @@ def test_a_badly_formatted_plan_is_sent_back_to_the_coordinator(configured, use_
         **INVENTORY_FLOW,
         "Coordenador de Melhoria Contínua": [
             "Plano: trocar queimadores, ROI de 14 meses.\nNext agent: Nenhum",
-            as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum",
+            with_extracted_inventory(as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"),
         ],
     })
 
     plan = AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
         id_request=REQUEST_ID,
+        **CATALOGS,
     ).plan
 
     assert plan.method == PLAN_FIELDS["method"]
@@ -996,12 +1024,12 @@ def test_only_the_coordinator_answers_again_on_a_retry(configured, use_fake_llm)
         **INVENTORY_FLOW,
         "Coordenador de Melhoria Contínua": [
             "Plano em prosa.\nNext agent: Nenhum",
-            as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum",
+            with_extracted_inventory(as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"),
         ],
     })
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     analysts = [name for name, _ in llm.calls if name != "Coordenador de Melhoria Contínua"]
@@ -1013,12 +1041,12 @@ def test_the_retry_tells_the_coordinator_which_sections_are_missing(configured, 
         **INVENTORY_FLOW,
         "Coordenador de Melhoria Contínua": [
             as_sections({"defined_problem": PLAN_FIELDS["defined_problem"]}) + "\nNext agent: Nenhum",
-            as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum",
+            with_extracted_inventory(as_sections(PLAN_FIELDS) + "\nNext agent: Nenhum"),
         ],
     })
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     retry = llm.prompt_for("Coordenador de Melhoria Contínua")
@@ -1032,8 +1060,10 @@ def test_a_plan_never_formatted_is_refused_after_every_retry(configured, use_fak
 
     with pytest.raises(MalformedAgentOutputError):
         AekoInventoryAnalyzer().analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID,
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
             id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
     assert _coordinator_calls(llm) == PLAN_FORMAT_MAX_RETRIES + 1
@@ -1043,7 +1073,7 @@ def test_a_well_formed_plan_is_never_retried(configured, use_fake_llm):
     llm = use_fake_llm(INVENTORY_FLOW)
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert _coordinator_calls(llm) == 1
@@ -1070,7 +1100,7 @@ def test_analyze_enters_through_the_inventory_analyst(configured, use_fake_llm):
     llm = use_fake_llm(INVENTORY_FLOW)
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert llm.agents_called()[0] == "Análista de inventários"
@@ -1081,7 +1111,7 @@ def test_analyze_forwards_the_inventory_to_the_first_agent(configured, use_fake_
     llm = use_fake_llm(INVENTORY_FLOW)
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert INVENTORY_MD in llm.prompt_for("Análista de inventários")
@@ -1092,7 +1122,7 @@ def test_set_context_reaches_the_agents(configured, use_fake_llm):
     analyzer = AekoInventoryAnalyzer()
     analyzer.set_context("Relatorio 2022: 2.100 tCO2e, foco em fornos.")
 
-    analyzer.analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID)
+    analyzer.analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS)
 
     assert "Relatorio 2022" in llm.prompt_for("Análista de inventários")
 
@@ -1111,7 +1141,7 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
     RUNTIME.agents.clear()
 
     AekoInventoryAnalyzer().analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID
+        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
     )
 
     assert caps == [DEFAULT_REPORT_MAX_TOKENS]
