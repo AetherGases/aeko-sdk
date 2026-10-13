@@ -62,7 +62,8 @@ def _render_instructions(prompt: PromptSpec) -> str:
             "Ao final da sua resposta, adicione uma nova linha no formato exato "
             "\"Next agent: <Nome>\", usando exatamente um dos nomes listados em "
             "\"Agentes disponiveis\". Se nao houver um proximo agente (fluxo "
-            "encerrado), utilize \"Next agent: Nenhum\"."
+            "encerrado), utilize \"Next agent: Nenhum\". Essa linha deve ser a "
+            "última da resposta: não escreva nada depois dela."
         )),
     ]
 

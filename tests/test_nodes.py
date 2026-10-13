@@ -189,6 +189,32 @@ def test_invoke_agent_raises_for_unknown_agent_name(use_agents):
         pass
 
 
+def test_invoke_agent_ignores_text_below_the_next_agent_line(use_agents):
+    use_agents({
+        "FAQ": _FakeAgent(
+            "Ok.\nNext agent: Nenhum\n\n```inventory\n{\"emissions\": []}\n```"
+        ),
+    })
+
+    output, next_agent = nodes._invoke_agent("FAQ", HumanMessage(content="Oi"))
+
+    assert next_agent is None
+    assert "```inventory" in output
+
+
+def test_invoke_agent_routes_when_text_follows_the_next_agent_name(use_agents):
+    use_agents({
+        "Roteador": _FakeAgent(
+            "Direcionando.\nNext agent: FAQ\n\n```inventory\n{}\n```"
+        ),
+        "FAQ": _FakeAgent("dummy"),
+    })
+
+    _, next_agent = nodes._invoke_agent("Roteador", HumanMessage(content="Oi"))
+
+    assert next_agent["agent"] == "FAQ"
+
+
 # --- _coordenador_melhoria_node --------------------------------------------
 
 

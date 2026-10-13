@@ -5,6 +5,28 @@ import unicodedata
 ROUTING_MARKER = "Next agent: "
 
 
+def next_agent_name(text: str) -> str:
+    """
+    Read the agent named on the last routing-marker line.
+
+    Only that line is the handoff. Anything the model writes below it — a
+    leftover fence, an inventory block, trailing prose — is not a name, and
+    treating it as one is what turns a valid "Nenhum" into a ValueError.
+
+    Args:
+        text: The agent's raw output.
+
+    Returns:
+        str: The name after the last "Next agent: ", stripped, or "" when the
+            marker is absent.
+    """
+
+    if ROUTING_MARKER not in text:
+        return ""
+
+    return text.split(ROUTING_MARKER)[-1].splitlines()[0].strip()
+
+
 def strip_routing_marker(text: str) -> str:
     """
     Remove the agents' internal handoff marker from a user-facing answer.
@@ -13,16 +35,28 @@ def strip_routing_marker(text: str) -> str:
     the graph routes (see `_invoke_agent` in aeko/engine/graph/nodes.py). The
     graph stores that raw output verbatim, so the marker has to be stripped
     before the text is handed to whoever consumes the SDK — it is protocol
-    between agents, not part of the answer.
+    between agents, not part of the answer. Text below that line is kept: the
+    model sometimes emits a payload after the marker, and dropping it would
+    throw the payload away with the protocol.
 
     Args:
         text: The raw agent output.
 
     Returns:
-        str: The answer without the trailing marker.
+        str: The answer without the routing line.
     """
 
-    return text.split(ROUTING_MARKER)[0].rstrip()
+    if ROUTING_MARKER not in text:
+        return text
+
+    before, after = text.rsplit(ROUTING_MARKER, 1)
+    remainder = "\n".join(after.splitlines()[1:]).strip()
+    body = before.rstrip()
+
+    if remainder:
+        return f"{body}\n\n{remainder}" if body else remainder
+
+    return body
 
 
 def _comparable(label: str) -> str:

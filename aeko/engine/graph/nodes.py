@@ -264,7 +264,12 @@ def _invoke_agent(agent_name: str, message: HumanMessage,
         else:
             output = text_of(result["messages"][-1].content)
 
-    raw_next = output.split("Next agent: ")[-1].strip() if "Next agent: " in output else ""
+    # Imported here so the graph module never loads `aeko.config` at import
+    # time: that package's `__init__` pulls the inventory facade, which
+    # imports this module back.
+    from aeko.config._text import next_agent_name
+
+    raw_next = next_agent_name(output)
 
     if raw_next in ("", "Nenhum"):
         next_agent = None

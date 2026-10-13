@@ -49,6 +49,7 @@ def test_build_prompt_instructs_next_agent_marker():
 
     assert "Next agent:" in system_content
     assert "Nenhum" in system_content
+    assert "não escreva nada depois dela" in system_content
 
 
 def test_build_prompt_only_requires_messages_as_input():

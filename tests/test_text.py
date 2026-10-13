@@ -2,7 +2,7 @@
 
 import pytest
 
-from aeko.config._text import parse_sections, strip_routing_marker
+from aeko.config._text import next_agent_name, parse_sections, strip_routing_marker
 
 LABELS = {
     "defined_problem": "Problema definido",
@@ -29,6 +29,29 @@ def test_the_routing_marker_is_stripped():
 
 def test_an_answer_without_a_marker_is_left_alone():
     assert strip_routing_marker("Resposta.") == "Resposta."
+
+
+def test_text_below_the_routing_marker_is_kept():
+    answer = "Resposta.\nNext agent: Nenhum\n\n```inventory\n{}\n```"
+
+    assert strip_routing_marker(answer) == "Resposta.\n\n```inventory\n{}\n```"
+
+
+# --- next_agent_name -----------------------------------------------------
+
+
+def test_next_agent_name_is_the_rest_of_the_marker_line():
+    assert next_agent_name("Ok.\nNext agent: FAQ") == "FAQ"
+
+
+def test_next_agent_name_ignores_text_below_the_marker_line():
+    assert next_agent_name(
+        "Ok.\nNext agent: Nenhum\n\n```inventory\n{}\n```"
+    ) == "Nenhum"
+
+
+def test_next_agent_name_is_empty_when_there_is_no_marker():
+    assert next_agent_name("Ok.") == ""
 
 
 # --- parse_sections ------------------------------------------------------
