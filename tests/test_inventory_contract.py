@@ -150,6 +150,43 @@ def _coordinator_used_agents(metrics) -> int:
     return sum(1 for agent in metrics.used_agents if agent.name == COORDINATOR)
 
 
+def test_set_context_blank_is_stored_as_empty():
+    analyzer = AekoInventoryAnalyzer()
+    analyzer.set_context("Relatorio 2022")
+    assert analyzer._context == "Relatorio 2022"
+    analyzer.set_context("")
+    assert analyzer._context == ""
+
+
+def test_prose_plan_is_refused_before_schema_fill(configured, use_fake_llm, monkeypatch):
+    fill = _patch_fill(monkeypatch, Mock(side_effect=_raise_schema_unavailable))
+    use_fake_llm({
+        "Análista de inventários": "Escopo 1.\nNext agent: Analista de Poluentes",
+        "Analista de Poluentes": "Combustao.\nNext agent: Orquestrador",
+        COORDINATOR: "Plano em prosa.\nNext agent: Nenhum",
+    })
+
+    with pytest.raises(MalformedAgentOutputError):
+        _run_analyze()
+
+    fill.assert_not_called()
+
+
+def test_incomplete_plan_is_refused_before_schema_fill(configured, use_fake_llm, monkeypatch):
+    fill = _patch_fill(monkeypatch, Mock(side_effect=_raise_schema_unavailable))
+    incomplete = {key: value for key, value in PLAN_FIELDS.items() if key != "reasoning"}
+    use_fake_llm({
+        "Análista de inventários": "Escopo 1.\nNext agent: Analista de Poluentes",
+        "Analista de Poluentes": "Combustao.\nNext agent: Orquestrador",
+        COORDINATOR: as_sections(incomplete) + "\nNext agent: Nenhum",
+    })
+
+    with pytest.raises(MalformedAgentOutputError):
+        _run_analyze()
+
+    fill.assert_not_called()
+
+
 def test_analyze_requires_the_three_catalogs_as_keyword_only_arguments(configured, use_fake_llm):
     use_fake_llm(_flow())
 
@@ -211,6 +248,22 @@ def test_a_valid_plan_without_inventory_is_refused(configured, use_fake_llm, mon
     assert fill.call_count == INVENTORY_SCHEMA_MAX_RETRIES
     assert raised.value.aeko_metrics is not None
     assert raised.value.aeko_metrics.id_request == REQUEST_ID
+
+
+def test_uncoercible_quantity_string_is_refused_without_schema_fill(
+    configured, use_fake_llm, monkeypatch
+):
+    fill = _patch_fill(monkeypatch, Mock(side_effect=_raise_schema_unavailable))
+    use_fake_llm(_flow({
+        **VALID_INVENTORY,
+        "emissions": [{**VALID_EMISSION, "quantity_co2e": "n/a", "gas": "CO2"}],
+    }))
+
+    with pytest.raises(MalformedAgentOutputError) as raised:
+        _run_analyze()
+
+    fill.assert_not_called()
+    assert raised.value.aeko_metrics is not None
 
 
 def test_an_inventory_referencing_an_unknown_id_is_refused(

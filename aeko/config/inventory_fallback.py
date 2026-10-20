@@ -77,7 +77,12 @@ def _validate_canonical_inventory(
         MalformedAgentOutputError: If Pydantic rejects the canonical payload.
     """
 
-    canonical = canonicalize(payload, catalogs)
+    try:
+        canonical = canonicalize(payload, catalogs)
+    except (ValueError, TypeError) as exc:
+        raise MalformedAgentOutputError(
+            f"O inventário estruturado viola o contrato de persistência: {exc}"
+        ) from exc
     context = _catalog_validation_context(catalogs)
     try:
         return AekoExtractedInventory.model_validate(canonical, context=context)

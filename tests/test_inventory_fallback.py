@@ -80,6 +80,56 @@ def test_salvage_dict_semantic_failure_raises_without_schema(catalogs):
     fill_schema.assert_not_called()
 
 
+def test_uncoercible_quantity_string_raises_malformed_without_schema(catalogs):
+    payload = _valid_payload()
+    payload["emissions"][0]["quantity_co2e"] = "n/a"
+    payload["emissions"][0]["gas"] = "CO2"
+    fill_schema = Mock()
+
+    with pytest.raises(MalformedAgentOutputError):
+        recover_extracted_inventory(
+            "answer",
+            catalogs,
+            "markdown",
+            salvage=Mock(return_value=payload),
+            fill_schema=fill_schema,
+        )
+
+    fill_schema.assert_not_called()
+
+
+def test_canonicalize_value_error_is_mapped_to_malformed(catalogs):
+    fill_schema = Mock()
+
+    with pytest.raises(MalformedAgentOutputError):
+        recover_extracted_inventory(
+            "answer",
+            catalogs,
+            "markdown",
+            salvage=Mock(return_value=_valid_payload()),
+            canonicalize=Mock(side_effect=ValueError("cannot coerce")),
+            fill_schema=fill_schema,
+        )
+
+    fill_schema.assert_not_called()
+
+
+def test_canonicalize_type_error_is_mapped_to_malformed(catalogs):
+    fill_schema = Mock()
+
+    with pytest.raises(MalformedAgentOutputError):
+        recover_extracted_inventory(
+            "answer",
+            catalogs,
+            "markdown",
+            salvage=Mock(return_value=_valid_payload()),
+            canonicalize=Mock(side_effect=TypeError("cannot coerce")),
+            fill_schema=fill_schema,
+        )
+
+    fill_schema.assert_not_called()
+
+
 def test_fill_schema_receives_markdown_and_catalogs_only(catalogs):
     fill_schema = Mock(return_value=_valid_payload())
 

@@ -2,13 +2,14 @@
 
 import re
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from aeko.config._text import parse_sections, strip_routing_marker
 from aeko.config.constants import INVENTORY_ENTRY_POINT, INVENTORY_LOG_MODULE
 from aeko.config.dto import (
     AekoAnalysisResponse,
     AekoCatalogItem,
     AekoCategoryCatalogItem,
-    AekoExtractedInventory,
     AekoImprovementPlan,
     AekoInventoryCatalogs,
 )
@@ -132,13 +133,40 @@ def _render_catalogs(catalogs: AekoInventoryCatalogs) -> str:
     return "\n".join(parts)
 
 
+class _InventoryFillEmission(BaseModel):
+    """Dump-only emission row used to constrain schema generation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    quantity_co2e: object = None
+    methodology_description: object = None
+    supplier_data_percentage: object = None
+    gas: object = None
+    scope: object = None
+    category: object = None
+    is_upstream: object = None
+    is_reduction: object = None
+
+
+class _InventoryFillShape(BaseModel):
+    """Dump-only inventory shape without persistence validators."""
+
+    model_config = ConfigDict(extra="allow")
+
+    description: object = None
+    start_period: object = None
+    end_period: object = None
+    emissions: list[_InventoryFillEmission] = Field(default_factory=list)
+
+
 def _fill_inventory_from_schema(
     inventory_markdown: str, catalogs: AekoInventoryCatalogs
 ) -> dict:
     """
     Fill the extracted-inventory schema from markdown and catalogs only.
 
-    Uses the slow Gemini model with constrained structured output. The
+    Uses the slow Gemini model with constrained structured output against a
+    dump-only shape, so persistence validators do not run here. The
     coordinator answer, broken JSON and plan sections are deliberately left
     out: this is the salvage fallback, not a rewrite of the frozen plan.
     Failures propagate so `recover_extracted_inventory` can count the attempt.
@@ -148,14 +176,14 @@ def _fill_inventory_from_schema(
         catalogs: Auxiliary catalogs of the same call.
 
     Returns:
-        dict: A root object matching `AekoExtractedInventory` fields.
+        dict: A root object matching extracted-inventory fields.
 
     Raises:
         TypeError: If structured output is neither a dict nor a dumpable model.
     """
 
     _, slow_llm = create_llms(max_tokens=RUNTIME.report_max_tokens)
-    structured = slow_llm.with_structured_output(AekoExtractedInventory)
+    structured = slow_llm.with_structured_output(_InventoryFillShape)
     prompt = f"{inventory_markdown}\n\n{_render_catalogs(catalogs)}"
 
     with agent_call("Coordenador de Melhoria Contínua") as call:

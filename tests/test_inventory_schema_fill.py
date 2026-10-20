@@ -1,13 +1,21 @@
 """Tests for constrained inventory schema fill used after salvage fails."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError
 
 from aeko import Aeko
 from aeko.config.constants import INVENTORY_LOG_MODULE
 from aeko.config.dto import AekoExtractedInventory, AekoInventoryCatalogs
-from aeko.config.inventory import _fill_inventory_from_schema, _render_catalogs
+from aeko.config.exceptions import MalformedAgentOutputError
+from aeko.config.inventory import (
+    _InventoryFillShape,
+    _fill_inventory_from_schema,
+    _render_catalogs,
+)
+from aeko.config.inventory_fallback import recover_extracted_inventory
 from aeko.engine.runtime import RUNTIME
 from aeko.shared import Flow, processing
 from tests.conftest import catalog_kwargs
@@ -74,7 +82,7 @@ def test_fill_records_coordinator_agent_call(configured, catalogs, monkeypatch):
     ]
     assert capture["callbacks"] is not None
     assert capture["max_tokens"] == RUNTIME.report_max_tokens
-    assert capture["schema"] is AekoExtractedInventory
+    assert capture["schema"] is _InventoryFillShape
 
 
 def test_fill_prompt_is_markdown_and_catalogs_only(configured, catalogs, monkeypatch):
@@ -120,6 +128,88 @@ def test_fill_raises_when_structured_output_is_not_a_dict_or_model(
     with processing(Flow.REPORT, INVENTORY_LOG_MODULE, REQUEST_ID):
         with pytest.raises(TypeError):
             _fill_inventory_from_schema(INVENTORY_MD, catalogs)
+
+
+def _negative_quantity_payload() -> dict:
+    return {
+        "description": "Inventario 2023",
+        "start_period": "2023-01-01",
+        "end_period": "2023-12-31",
+        "emissions": [
+            {
+                "quantity_co2e": -1,
+                "methodology_description": None,
+                "supplier_data_percentage": None,
+                "gas": 1,
+                "scope": 1,
+                "category": 1,
+                "is_upstream": None,
+                "is_reduction": False,
+            }
+        ],
+    }
+
+
+def test_fill_returns_dict_when_structured_output_quantity_is_negative(
+    configured, catalogs, monkeypatch
+):
+    payload = _negative_quantity_payload()
+    capture = {}
+
+    class Structured:
+        def invoke(self, prompt, config=None):
+            return capture["schema"].model_validate(payload)
+
+    class SlowLlm:
+        def with_structured_output(self, schema):
+            capture["schema"] = schema
+            return Structured()
+
+    monkeypatch.setattr(
+        "aeko.config.inventory.create_llms",
+        lambda max_tokens=None: (object(), SlowLlm()),
+    )
+
+    with processing(Flow.REPORT, INVENTORY_LOG_MODULE, REQUEST_ID):
+        filled = _fill_inventory_from_schema(INVENTORY_MD, catalogs)
+
+    assert filled["emissions"][0]["quantity_co2e"] == -1
+    with pytest.raises(ValidationError):
+        AekoExtractedInventory.model_validate(filled)
+
+
+def test_recover_does_not_retry_fill_when_schema_returns_negative_quantity(
+    configured, catalogs, monkeypatch
+):
+    payload = _negative_quantity_payload()
+    capture = {"invoke_count": 0}
+
+    class Structured:
+        def invoke(self, prompt, config=None):
+            capture["invoke_count"] += 1
+            return capture["schema"].model_validate(payload)
+
+    class SlowLlm:
+        def with_structured_output(self, schema):
+            capture["schema"] = schema
+            return Structured()
+
+    monkeypatch.setattr(
+        "aeko.config.inventory.create_llms",
+        lambda max_tokens=None: (object(), SlowLlm()),
+    )
+
+    with processing(Flow.REPORT, INVENTORY_LOG_MODULE, REQUEST_ID):
+        with pytest.raises(MalformedAgentOutputError):
+            recover_extracted_inventory(
+                "answer",
+                catalogs,
+                INVENTORY_MD,
+                salvage=Mock(return_value=None),
+                fill_schema=_fill_inventory_from_schema,
+            )
+
+    assert capture["invoke_count"] == 1
 
 
 def test_fill_still_records_the_agent_when_invoke_raises(

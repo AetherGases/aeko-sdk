@@ -49,7 +49,10 @@ def _coerce_float(value: object) -> object:
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
-        return float(value)
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return value
     return value
 
 
@@ -64,7 +67,10 @@ def _coerce_int(value: object) -> object:
     if isinstance(value, float):
         return int(value)
     if isinstance(value, str):
-        return int(float(value))
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return value
     return value
 
 

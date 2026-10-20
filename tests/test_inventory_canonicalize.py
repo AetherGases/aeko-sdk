@@ -222,6 +222,29 @@ def test_unrecognized_bool_string_is_left_unchanged(catalogs):
     assert item["is_reduction"] == "n/a"
 
 
+def test_uncoercible_numeric_strings_are_left_unchanged(catalogs):
+    item = canonicalize_inventory_payload(
+        {
+            "emissions": [
+                {
+                    "quantity_co2e": "n/a",
+                    "gas": "CO2",
+                    "scope": "1200 tCO2e",
+                    "category": 1,
+                    "is_reduction": False,
+                    "supplier_data_percentage": "n/a",
+                }
+            ]
+        },
+        catalogs,
+    )["emissions"][0]
+
+    assert item["quantity_co2e"] == "n/a"
+    assert item["gas"] == "CO2"
+    assert item["scope"] == "1200 tCO2e"
+    assert item["supplier_data_percentage"] == "n/a"
+
+
 def test_null_quantity_and_numeric_catalog_ids(catalogs):
     item = canonicalize_inventory_payload(
         {
