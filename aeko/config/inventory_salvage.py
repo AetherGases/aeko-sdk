@@ -29,11 +29,54 @@ def _heading_in(line: str) -> str | None:
 
 
 def _repair_serialization(raw: str) -> str:
-    text = _TRAILING_COMMA.sub(r"\1", raw)
-    text = _PYTHON_NONE.sub("null", text)
-    text = _PYTHON_TRUE.sub("true", text)
-    text = _PYTHON_FALSE.sub("false", text)
-    return text
+    parts: list[str] = []
+    in_string = False
+    escape = False
+    index = 0
+    length = len(raw)
+
+    while index < length:
+        if in_string:
+            parts.append(raw[index])
+            if escape:
+                escape = False
+            elif raw[index] == "\\":
+                escape = True
+            elif raw[index] == '"':
+                in_string = False
+            index += 1
+            continue
+
+        trailing = _TRAILING_COMMA.match(raw, index)
+        if trailing is not None:
+            parts.append(trailing.group(1))
+            index = trailing.end()
+            continue
+
+        none_match = _PYTHON_NONE.match(raw, index)
+        if none_match is not None:
+            parts.append("null")
+            index = none_match.end()
+            continue
+
+        true_match = _PYTHON_TRUE.match(raw, index)
+        if true_match is not None:
+            parts.append("true")
+            index = true_match.end()
+            continue
+
+        false_match = _PYTHON_FALSE.match(raw, index)
+        if false_match is not None:
+            parts.append("false")
+            index = false_match.end()
+            continue
+
+        if raw[index] == '"':
+            in_string = True
+        parts.append(raw[index])
+        index += 1
+
+    return "".join(parts)
 
 
 def _load_object(raw: str) -> dict | None:

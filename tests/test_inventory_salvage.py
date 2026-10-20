@@ -77,6 +77,22 @@ def test_fr_c03_python_literals_in_fence_repairs_and_parses():
     }
 
 
+def test_fr_c03_repair_preserves_literals_and_commas_inside_strings():
+    note = "Set True here, None of False"
+    block = (
+        "```inventory\n"
+        f'{{"description": "{note}", "emissions": [], "flag": True,}}\n'
+        "```"
+    )
+    answer = as_sections(PLAN_FIELDS) + "\n\n" + block
+
+    assert salvage_inventory_payload(answer) == {
+        "description": note,
+        "emissions": [],
+        "flag": True,
+    }
+
+
 def test_fr_c03_single_quotes_are_not_repaired_returns_none():
     block = "```inventory\n{'description': 'x', 'emissions': []}\n```"
     answer = as_sections(PLAN_FIELDS) + "\n\n" + block
