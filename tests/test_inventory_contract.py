@@ -85,6 +85,10 @@ def _analyze(configured, use_fake_llm, payload: dict | None = VALID_INVENTORY, *
     )
 
 
+def _raise_schema_unavailable(*_args, **_kwargs):
+    raise RuntimeError("schema fill is stubbed in this test")
+
+
 def test_analyze_requires_the_three_catalogs_as_keyword_only_arguments(configured, use_fake_llm):
     use_fake_llm(_flow())
 
@@ -136,7 +140,11 @@ def test_the_plan_contract_is_unchanged_when_inventory_is_present(configured, us
     assert plan.id is None
 
 
-def test_a_valid_plan_without_inventory_is_refused(configured, use_fake_llm):
+def test_a_valid_plan_without_inventory_is_refused(configured, use_fake_llm, monkeypatch):
+    monkeypatch.setattr(
+        "aeko.config.inventory._fill_inventory_from_schema",
+        _raise_schema_unavailable,
+    )
     use_fake_llm({
         "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
         "Analista de Poluentes": "Combustao dominante.\nNext agent: Orquestrador",
@@ -172,7 +180,11 @@ def test_an_inventory_referencing_an_unknown_id_is_refused(configured, use_fake_
     assert raised.value.aeko_metrics is not None
 
 
-def test_malformed_inventory_json_is_refused(configured, use_fake_llm):
+def test_malformed_inventory_json_is_refused(configured, use_fake_llm, monkeypatch):
+    monkeypatch.setattr(
+        "aeko.config.inventory._fill_inventory_from_schema",
+        _raise_schema_unavailable,
+    )
     use_fake_llm({
         "Análista de inventários": "Escopo 1.\nNext agent: Analista de Poluentes",
         "Analista de Poluentes": "Combustao.\nNext agent: Orquestrador",
