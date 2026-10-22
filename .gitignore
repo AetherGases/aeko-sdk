@@ -38,3 +38,4 @@ result.txt
 dist/
 build/
 *.egg-info/
+.coverage

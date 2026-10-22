@@ -523,24 +523,50 @@ Headings rather than a JSON object, for the same reason the agents route on a li
 `Next agent:` line: this flow runs with the report token cap, and a truncated JSON object
 is unparseable and costs the whole plan, while a truncated last section still yields the
 ones written before it. That truncation argument applies to the **plan in sections**, not
-to `inventory`: the structured payload is a separate ```inventory JSON block after the
-three headings, and a missing or invalid block raises `MalformedAgentOutputError` the
-same way a missing plan section does. Only those three headings delimit a plan section,
-so a subtitle the agent writes mid-answer never cuts its own text short — and case and
-accents are ignored when matching them, so `## RACIOCINIO` is read as `## Raciocínio`.
+to `inventory`: on the happy path the coordinator still writes a separate fenced
+```inventory JSON block after the three headings. The graph does **not** use structured
+output for the whole answer — only free-form prose plus that fence. Only those three
+headings delimit a plan section, so a subtitle the agent writes mid-answer never cuts its
+own text short — and case and accents are ignored when matching them, so `## RACIOCINIO`
+is read as `## Raciocínio`.
 
-An answer that misses a section is **sent back to the coordinator to be rewritten**, with
-the missing headings named and the original request attached, up to four times
-(`PLAN_FORMAT_MAX_RETRIES`). The retry happens inside the graph and only re-asks the
+An answer that misses a plan section is **sent back to the coordinator to be rewritten**,
+with the missing headings named and the original request attached, up to four times
+(`PLAN_FORMAT_MAX_RETRIES`). That retry happens **inside the graph** and only re-asks the
 coordinator — the inventory, pollutant and green gas analysts already ran, and their
 findings stay in the state. If the format never comes, `analyze()` raises
-`MalformedAgentOutputError` rather than padding the plan with guesses: the SDK will not
-hand you a plan whose fields it invented. The same error is raised when `inventory` is
-missing or cites a catalog id that was not in the call. The model is also never given a
-say in `_id` or `updated_at` — only the three content fields are read back from it.
+`MalformedAgentOutputError` rather than padding the plan with guesses. The model is never
+given a say in `_id` or `updated_at` — only the three content fields are read back from it.
 
-Budget for it: a plan that takes every retry costs five coordinator calls at the report
-token cap, on top of the analysts. A well-formed answer costs exactly one.
+**After the graph**, the SDK parses the plan first, then recovers `inventory` in a
+deterministic step that does not re-run the analysts:
+
+1. **Salvage** — locate the ```inventory fence in the coordinator's answer, parse the JSON,
+   and tolerate common slips (trailing commas, minor fence damage).
+2. **Canonicalize** — normalize types and nulls and derive `is_upstream` from each line's
+   category classification in the catalogs you passed in.
+
+If salvage yields a dict, canonicalization and contract validation run locally. Failures
+that are **semantic** — an unknown catalog id, a quantity out of range, a shape the
+persistence contract rejects — raise `MalformedAgentOutputError` and **do not** ask the
+model again.
+
+When salvage cannot recover JSON at all, the SDK may call the **same slow coordinator**
+again with a constrained inventory-only prompt, up to two times
+(`INVENTORY_SCHEMA_MAX_RETRIES`). The plan parsed from the first answer stays **frozen**;
+these calls only try to produce the structured payload. Each attempt is an extra
+`Coordenador de Melhoria Contínua` entry in `aeko_metrics.used_agents`. If salvage and
+every schema attempt fail, `analyze()` raises `MalformedAgentOutputError` — but that is
+not the same as failing on the first malformed fence with no recovery attempt.
+
+**Chat is unchanged.** `send_message()` never asks for an ```inventory fence and never
+runs salvage or schema fill; the coordinator's three headings stay report-only.
+
+**Cost.** A well-formed report costs one coordinator call at the report token cap, on top
+of the analysts. A plan that uses every in-graph rewrite costs five coordinator calls for
+the prose, same as before. Schema fill is **additional**: zero on the happy path when
+salvage succeeds, and at most two slow coordinator calls when JSON is irrecoverable from
+the first answer.
 
 There is no `approved` field: this flow ends at the continuous improvement coordinator, a
 terminal node, and never reaches the output guardrail or the response checker. Its answer
@@ -775,7 +801,7 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | --- | --- | --- |
 | `AekoNotConfiguredError` | `Aeko.config()` was never called, or the key is empty/not a string. | `503` — a deployment problem, not a user one. |
 | `UnknownAgentError` | `set_tools()` got a key that is not an agent name. Carries `.agent` and `.known_agents`. | Fail at startup. |
-| `MalformedAgentOutputError` | A run produced nothing usable: the improvement plan never came back in its three headings after four rewrites, or a chat turn was rejected by the output guardrail or the response checker up to their retry caps. | `502` — retry rather than persisting a guess or an empty turn. |
+| `MalformedAgentOutputError` | A run produced nothing usable: the plan never came back in its three headings after four in-graph rewrites; salvage and up to two inventory schema fills could not yield a valid structured payload; semantic inventory validation failed after a dict was obtained; or a chat turn was rejected by the output guardrail or the response checker up to their retry caps. | `502` — retry rather than persisting a guess or an empty turn. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
 
 Every `AekoError` raised *inside* a request carries that request's
@@ -985,6 +1011,7 @@ session.model_dump(by_alias=True, exclude_none=True)
 | Guardrail retry cap | `2` | fixed — `GUARD_RAIL_MAX_RETRIES` |
 | Response check retry cap | `2` | fixed — `RESPONSE_CHECK_MAX_RETRIES` |
 | Plan rewrite cap | `4` | fixed — `PLAN_FORMAT_MAX_RETRIES` |
+| Inventory schema fill cap | `2` | fixed — `INVENTORY_SCHEMA_MAX_RETRIES` |
 | Replayed turns | `10` | fixed — `SESSION_HISTORY_USAGE` |
 
 ## Development
@@ -1099,8 +1126,11 @@ nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
    gerado e barra o que as análises não sustentam. Cada um pode devolver a resposta ao
    Roteador **2 vezes**; na segunda reprovação o run acaba sem resposta e o
    `send_message()` levanta `MalformedAgentOutputError` — as métricas vêm em
-   `exc.aeko_metrics`. Um plano de melhoria fora do formato levanta a mesma exceção,
-   depois de o Coordenador ser convidado a reescrever a resposta até quatro vezes.
+   `exc.aeko_metrics`.    Um plano fora do formato levanta a mesma exceção depois de até quatro reescritas
+   **no grafo**. O inventário estruturado passa por salvage/canonicalização determinística
+   após o grafo; só JSON irrecuperável dispara até duas chamadas extras do Coordenador
+   (só inventário, plano congelado). Falhas semânticas de catálogo não reconvocam o modelo.
+   O chat não usa fence de inventário nem schema fill.
 
 Os nomes dos agentes (`Roteador`, `FAQ`, `Orquestrador`, `Guardrail de Saída`,
 `Verificador de Resposta`, `Análista de inventários`, `Analista de Poluentes`,
