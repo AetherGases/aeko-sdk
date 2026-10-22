@@ -1,19 +1,33 @@
+"""tests/test_agents.py."""
+
 import pytest
+
 from langchain_core.language_models.chat_models import BaseChatModel
+
 from langchain_core.messages import HumanMessage
+
 from langchain_core.prompts import ChatPromptTemplate
+
 from langchain_core.tools import tool
 
+
 from aeko.config.dto import AekoTool
-from aeko.engine.agents.agents import FAST_AGENTS, create_agents
+
+from aeko.engine.agents.constants import FAST_AGENTS
+
+from aeko.engine.agents.agents import create_agents
+
 from aeko.engine.runtime import RUNTIME
 
+
 from tests.conftest import PERSONA_MARKER
+
 
 IDENTITY_QUESTION = (
     "Quem e voce? Qual e o seu nome de agente e a sua funcao no ecossistema Aether? "
     "Responda apenas com o seu nome de agente."
 )
+
 
 EXPECTED_AGENTS = {
     "Roteador": "roteador",
@@ -44,11 +58,14 @@ def identity_llm(use_fake_llm):
 
 @pytest.fixture
 def agents(identity_llm):
+    """Agents."""
     return create_agents()
 
 
 def _ask_identity(agent) -> str:
+    """Ask identity."""
     result = agent.invoke({"messages": [HumanMessage(content=IDENTITY_QUESTION)]})
+
     return result["output"]
 
 
@@ -56,8 +73,11 @@ def _system_prompt(agent) -> str:
     """Render the system message an agent executor would send to its model."""
 
     prompt = next(
-        step for step in agent.agent.runnable.steps if isinstance(step, ChatPromptTemplate)
+        step
+        for step in agent.agent.runnable.steps
+        if isinstance(step, ChatPromptTemplate)
     )
+
     return prompt.invoke({"messages": [], "agent_scratchpad": []}).messages[0].content
 
 
@@ -70,22 +90,26 @@ def _model_of(agent) -> BaseChatModel:
 
 
 def test_create_agents_returns_all_expected_agents(agents):
+    """Create agents returns all expected agents."""
     assert set(agents.keys()) == set(EXPECTED_AGENTS)
 
 
 @pytest.mark.parametrize("agent_name, expected_substring", EXPECTED_AGENTS.items())
 def test_agent_identifies_itself(agents, agent_name, expected_substring):
+    """Agent identifies itself."""
     response = _ask_identity(agents[agent_name])
 
     assert expected_substring in response.lower()
 
 
 def test_agent_prompts_carry_their_own_persona(agents):
+    """Agent prompts carry their own persona."""
     for agent_name, executor in agents.items():
         assert PERSONA_MARKER + agent_name in _system_prompt(executor)
 
 
 def test_create_agents_requires_configuration():
+    """Create agents requires configuration."""
     from aeko.config.exceptions import AekoNotConfiguredError
 
     with pytest.raises(AekoNotConfiguredError):
@@ -93,54 +117,75 @@ def test_create_agents_requires_configuration():
 
 
 def test_agents_have_no_tools_by_default(agents):
+    """Agents have no tools by default."""
     assert all(executor.tools == [] for executor in agents.values())
 
 
 def test_registered_tools_are_bound_to_their_agent(identity_llm):
+    """Registered tools are bound to their agent."""
     RUNTIME.configure(tools={"Analista de Poluentes": [AekoTool(tool=consulta_precos)]})
 
     agents = create_agents()
 
-    assert [t.name for t in agents["Analista de Poluentes"].tools] == ["consulta_precos"]
+    assert [t.name for t in agents["Analista de Poluentes"].tools] == [
+        "consulta_precos"
+    ]
+
     assert agents["FAQ"].tools == []
 
 
 def test_registered_tools_are_described_in_the_prompt(identity_llm):
-    RUNTIME.configure(tools={
-        "Analista de Poluentes": [
-            AekoTool(tool=consulta_precos, description="Consulta o preco medio de mitigacoes."),
-        ],
-    })
+    """Registered tools are described in the prompt."""
+    RUNTIME.configure(
+        tools={
+            "Analista de Poluentes": [
+                AekoTool(
+                    tool=consulta_precos,
+                    description="Consulta o preco medio de mitigacoes.",
+                ),
+            ],
+        }
+    )
 
     agents = create_agents()
 
     prompt = _system_prompt(agents["Analista de Poluentes"])
 
     assert "consulta_precos - Consulta o preco medio de mitigacoes." in prompt
+
     assert "consulta_precos" not in _system_prompt(agents["FAQ"])
 
 
 def test_tool_description_falls_back_to_the_tools_own(identity_llm):
+    """Tool description falls back to the tools own."""
     RUNTIME.configure(tools={"FAQ": [AekoTool(tool=consulta_precos)]})
 
     agents = create_agents()
 
-    assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(agents["FAQ"])
+    assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(
+        agents["FAQ"]
+    )
 
 
 def test_bare_langchain_tools_are_accepted(identity_llm):
+    """Bare langchain tools are accepted."""
     RUNTIME.configure(tools={"FAQ": [consulta_precos]})
 
     agents = create_agents()
 
     assert [t.name for t in agents["FAQ"].tools] == ["consulta_precos"]
-    assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(agents["FAQ"])
+
+    assert "consulta_precos - Descricao que a propria tool declara." in _system_prompt(
+        agents["FAQ"]
+    )
 
 
 def test_specialists_get_the_slow_model_and_the_rest_the_fast_one(monkeypatch):
+    """Specialists get the slow model and the rest the fast one."""
     from tests.conftest import FakeChatModel
 
     fast, slow = FakeChatModel(model="fast"), FakeChatModel(model="slow")
+
     monkeypatch.setattr(
         "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fast, slow)
     )
@@ -149,4 +194,5 @@ def test_specialists_get_the_slow_model_and_the_rest_the_fast_one(monkeypatch):
 
     for name, executor in agents.items():
         expected = "fast" if name in FAST_AGENTS else "slow"
+
         assert _model_of(executor).model == expected, name

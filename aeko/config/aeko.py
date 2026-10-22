@@ -1,11 +1,12 @@
 """Public SDK configuration entry point."""
 
 from aeko.config.exceptions import AekoNotConfiguredError
-from aeko.engine.runtime import RUNTIME
-from aeko.shared import log_failure, log_success
-from aeko.config.constants import CONFIG_LOG_MODULE
 
-LOG_MODULE = CONFIG_LOG_MODULE
+from aeko.engine.runtime import RUNTIME
+
+from aeko.shared import log_failure, log_success
+
+from aeko.config.constants import CONFIG_LOG_MODULE
 
 
 class Aeko:
@@ -18,10 +19,17 @@ class Aeko:
     """
 
     @staticmethod
-    def config(api_key: str, *, fast_model: str | None = None, slow_model: str | None = None,
-               max_tokens: int | None = None, report_max_tokens: int | None = None,
-               temperature: float | None = None, top_p: float | None = None,
-               top_k: int | None = None) -> None:
+    def config(
+        api_key: str,
+        *,
+        fast_model: str | None = None,
+        slow_model: str | None = None,
+        max_tokens: int | None = None,
+        report_max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+    ) -> None:
         """
         Configure the SDK for this process.
 
@@ -42,9 +50,10 @@ class Aeko:
 
         if not api_key or not isinstance(api_key, str):
             log_failure(
-                LOG_MODULE,
+                CONFIG_LOG_MODULE,
                 "SDK configuration refused: missing or invalid API key.",
             )
+
             raise AekoNotConfiguredError("Aeko.config() requires a non-empty API key.")
 
         RUNTIME.configure(
@@ -59,7 +68,7 @@ class Aeko:
         )
 
         log_success(
-            LOG_MODULE,
+            CONFIG_LOG_MODULE,
             "SDK configured"
             f" (fast_model={RUNTIME.fast_model}, slow_model={RUNTIME.slow_model},"
             f" max_tokens={RUNTIME.max_tokens},"
@@ -83,4 +92,4 @@ class Aeko:
 
         RUNTIME.reset()
 
-        log_success(LOG_MODULE, "SDK reset to its defaults.")
+        log_success(CONFIG_LOG_MODULE, "SDK reset to its defaults.")

@@ -8,7 +8,9 @@ other.
 """
 
 from aeko.shared.colors import BLUE, LIGHT_BLUE, RED, RESET, colorize, success_color
+
 from aeko.shared.context import Flow, current_run
+
 from aeko.shared.event_tracking import (
     EVENT_TRACKING_FLOWS,
     METRICS_ATTR,
@@ -18,6 +20,7 @@ from aeko.shared.event_tracking import (
     AgentCallCollector,
     agent_call,
 )
+
 from aeko.shared.logger import (
     ITEM_PREFIX,
     LOG_PREFIX,
@@ -30,6 +33,7 @@ from aeko.shared.logger import (
     processing,
     record_agent_call,
 )
+
 
 __all__ = [
     "AekoAgentMetrics",

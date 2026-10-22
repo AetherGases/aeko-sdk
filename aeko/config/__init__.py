@@ -1,6 +1,7 @@
 """Public configuration, messaging, and inventory APIs."""
 
 from aeko.config.aeko import Aeko
+
 from aeko.config.dto import (
     AekoAnalysisResponse,
     AekoCatalogItem,
@@ -17,15 +18,20 @@ from aeko.config.dto import (
     AekoUser,
     AekoUserMemory,
 )
+
 from aeko.config.exceptions import (
     AekoError,
     AekoNotConfiguredError,
     MalformedAgentOutputError,
     UnknownAgentError,
 )
+
 from aeko.config.inventory import AekoInventoryAnalyzer
+
 from aeko.config.messenger import AekoMessenger
+
 from aeko.engine.prompts import AGENT_NAMES
+
 
 __all__ = [
     "AGENT_NAMES",

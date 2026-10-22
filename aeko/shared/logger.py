@@ -1,40 +1,36 @@
+"""Structured logging for SDK requests, without configuring the root logger."""
+
 from __future__ import annotations
 
+
 import logging
+
 import sys
+
 from contextlib import contextmanager
+
 from datetime import datetime
+
 from time import perf_counter
+
 from typing import Any, IO, Iterator
 
+
 from aeko.shared.colors import RED, colorize, success_color
-from aeko.shared.context import Flow, bind_run, current_run, unbind_run
-from aeko.shared.event_tracking import (
+
+from aeko.shared.constants import (
+    COLOR_KEY,
     EVENT_TRACKING_FLOWS,
+    ITEM_PREFIX,
+    LOG_PREFIX,
+    LOGGER_NAME,
     METRICS_ATTR,
-    AekoMetrics,
-    AgentCall,
+    MODULE_KEY,
 )
 
-# The bracket every line of this SDK opens with, so a consuming API can tell
-# our lines from its own at a glance.
-LOG_PREFIX = "aeko-sdk"
+from aeko.shared.context import Flow, bind_run, current_run, unbind_run
 
-# The logger the whole SDK emits through. A named logger of our own, never the
-# root one: a library that configures the root logger reconfigures logging for
-# the application that imported it, which is not ours to do.
-LOGGER_NAME = "aeko"
-
-# What each line of a record's detail list is opened with. The indent is what
-# keeps a multi-line record readable as one event rather than as several.
-ITEM_PREFIX = "  - "
-
-# The record attributes carrying what the format needs and the stdlib record
-# has no field for. Set through `extra=` at emission, never read from anywhere
-# else, so a record reaching our formatter from outside this module still
-# formats — with defaults — instead of raising.
-MODULE_KEY = "aeko_module"
-COLOR_KEY = "aeko_color"
+from aeko.shared.event_tracking import AekoMetrics, AgentCall
 
 
 class AekoFormatter(logging.Formatter):
@@ -64,6 +60,7 @@ class AekoFormatter(logging.Formatter):
         """
 
         super().__init__()
+
         self.colors = colors
 
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
@@ -99,11 +96,10 @@ class AekoFormatter(logging.Formatter):
         """
 
         module = getattr(record, MODULE_KEY, record.name)
+
         color = getattr(record, COLOR_KEY, "") if self.colors else ""
 
-        line = (
-            f"[{LOG_PREFIX}] [{module}] [{self.formatTime(record)}] {record.getMessage()}"
-        )
+        line = f"[{LOG_PREFIX}] [{module}] [{self.formatTime(record)}] {record.getMessage()}"
 
         if record.exc_info:
             line = f"{line}\n{self.formatException(record.exc_info)}"
@@ -126,14 +122,17 @@ def _wants_colors(stream: IO[str]) -> bool:
 
     try:
         return bool(stream.isatty())
+
     except (AttributeError, ValueError):
-        # A closed stream, or one that is not a real file object: assume the
-        # escapes would not be understood rather than risk writing them.
         return False
 
 
-def configure_logging(*, stream: IO[str] | None = None, level: int = logging.INFO,
-                      colors: bool | None = None) -> logging.Logger:
+def configure_logging(
+    *,
+    stream: IO[str] | None = None,
+    level: int = logging.INFO,
+    colors: bool | None = None,
+) -> logging.Logger:
     """
     Install the SDK's own handler on the SDK's own logger.
 
@@ -156,9 +155,11 @@ def configure_logging(*, stream: IO[str] | None = None, level: int = logging.INF
     """
 
     stream = sys.stderr if stream is None else stream
+
     logger = logging.getLogger(LOGGER_NAME)
 
     handler = logging.StreamHandler(stream)
+
     handler.setFormatter(
         AekoFormatter(colors=_wants_colors(stream) if colors is None else colors)
     )
@@ -167,7 +168,9 @@ def configure_logging(*, stream: IO[str] | None = None, level: int = logging.INF
         logger.removeHandler(installed)
 
     logger.addHandler(handler)
+
     logger.setLevel(level)
+
     logger.propagate = False
 
     return logger
@@ -315,17 +318,21 @@ class Processing:
         """
 
         self.flow = flow
+
         self.module = module
+
         self.id_request = id_request
+
         self._items: list[tuple[str, str]] = []
+
         self._agents: list[AgentCall] = []
+
         self._failure: str | None = None
+
         self._started = perf_counter()
 
-        # Both frozen by `_close`, so the event tracking a caller reads after
-        # the request ended reports the request's own duration and outcome
-        # rather than however long it took them to ask.
         self._latency: int | None = None
+
         self._error_description: str | None = None
 
     def item(self, label: str, value: Any) -> None:
@@ -399,6 +406,7 @@ class Processing:
             called = ", ".join(
                 f"{call.name} ({_as_millis(call.seconds)})" for call in self._agents
             )
+
             lines.append(f"{ITEM_PREFIX}agents: {called}")
 
         if not lines:
@@ -442,11 +450,14 @@ class Processing:
         """
 
         self._latency = round(self.elapsed * 1000)
+
         elapsed = f"{self.elapsed:.2f}s"
+
         details = self._details()
 
         if error is not None:
             reason = f"{type(error).__name__}: {error}"
+
         else:
             reason = self._failure
 
@@ -458,6 +469,7 @@ class Processing:
                 f"{self.flow.value} processing failed in {elapsed}: {reason}{details}",
                 flow=self.flow,
             )
+
             return
 
         log_success(
@@ -497,21 +509,25 @@ def processing(flow: Flow, module: str, id_request: str = "") -> Iterator[Proces
     """
 
     run = Processing(flow, module, id_request)
+
     token = bind_run(run)
 
     try:
         try:
             yield run
+
         except BaseException as error:
             run._close(error)
 
             try:
                 setattr(error, METRICS_ATTR, run.event_tracking())
-            except AttributeError:  # pragma: no cover - an exception with __slots__
+
+            except AttributeError:
                 pass
 
             raise
 
         run._close()
+
     finally:
         unbind_run(token)

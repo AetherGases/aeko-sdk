@@ -1,14 +1,25 @@
 """Data transfer objects exposed by the SDK configuration layer."""
 
 from dataclasses import dataclass
+
 from datetime import date, datetime, timezone
+
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+
 
 from aeko.shared import AekoMetrics
-from aeko.config.constants import LOG_ONLY_FIELDS
 
+from aeko.config.constants import LOG_ONLY_FIELDS
 
 
 def _now() -> datetime:
@@ -39,6 +50,7 @@ class AekoTool:
     """
 
     tool: Any
+
     description: str = ""
 
     @property
@@ -62,6 +74,7 @@ class AekoTool:
         """
 
         description = self.description or getattr(self.tool, "description", "")
+
         return f"{self.name} - {description}".rstrip(" -")
 
     @classmethod
@@ -100,8 +113,11 @@ class AekoUser(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str | None = Field(default=None, alias="_id")
+
     id_external_user: int
+
     role: str
+
     usecase: str = ""
 
     def to_prompt_context(self) -> str:
@@ -150,10 +166,15 @@ class AekoUserMemory(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str | None = Field(default=None, alias="_id")
+
     id_user: str | None = None
+
     field: str
+
     description: str
+
     created_at: datetime | None = None
+
     expires_at: datetime | None = None
 
     def to_prompt_line(self) -> str:
@@ -189,7 +210,9 @@ class AekoMessage(BaseModel):
     """
 
     input: str
+
     output: str = ""
+
     submitted_at: datetime = Field(default_factory=_now)
 
 
@@ -216,10 +239,15 @@ class AekoSession(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str | None = Field(default=None, alias="_id")
+
     id_user: str | None = None
+
     name: str = ""
+
     messages: list[AekoMessage] = Field(default_factory=list)
+
     created_at: datetime | None = None
+
     updated_at: datetime | None = None
 
 
@@ -251,11 +279,17 @@ class AekoMessageResponse(BaseModel):
     """
 
     message: AekoMessage
+
     aeko_metrics: AekoMetrics
+
     id_session: str | None = None
+
     id_user: str | None = None
+
     agents_called: list[str] = Field(default_factory=list)
+
     approved: bool = False
+
     guardrail_retries: int = Field(default=0, ge=0)
 
 
@@ -281,10 +315,15 @@ class AekoImprovementPlan(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str | None = Field(default=None, alias="_id")
+
     id_external_inventory: int
+
     defined_problem: str
+
     method: str
+
     reasoning: str
+
     updated_at: datetime = Field(default_factory=_now)
 
 
@@ -304,6 +343,7 @@ class AekoCatalogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int
+
     name: str
 
 
@@ -325,7 +365,9 @@ class AekoCategoryCatalogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: int
+
     name: str
+
     classification: Literal["UPSTREAM", "DOWNSTREAM"] | None = None
 
 
@@ -346,7 +388,9 @@ class AekoInventoryCatalogs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     gases: list[AekoCatalogItem]
+
     scopes: list[AekoCatalogItem]
+
     categories: list[AekoCategoryCatalogItem]
 
     @field_validator("gases", "scopes", "categories")
@@ -366,8 +410,10 @@ class AekoInventoryCatalogs(BaseModel):
         """
 
         ids = [item.id for item in items]
+
         if len(ids) != len(set(ids)):
             raise ValueError("catalog ids must be unique")
+
         return items
 
 
@@ -398,12 +444,19 @@ class AekoInventoryEmission(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     quantity_co2e: float
+
     methodology_description: str | None = None
+
     supplier_data_percentage: float | None = None
+
     gas: int | None = None
+
     scope: int | None = None
+
     category: int | None = None
+
     is_upstream: bool | None = None
+
     is_reduction: bool
 
     @field_validator("methodology_description")
@@ -424,6 +477,7 @@ class AekoInventoryEmission(BaseModel):
 
         if value is not None and len(value) > 150:
             raise ValueError("methodology_description must be at most 150 characters")
+
         return value
 
     @field_validator("supplier_data_percentage")
@@ -444,10 +498,13 @@ class AekoInventoryEmission(BaseModel):
 
         if value is not None and not 0 <= value <= 100:
             raise ValueError("supplier_data_percentage must be in [0, 100]")
+
         return value
 
     @model_validator(mode="after")
-    def matches_the_row_kind_and_catalogs(self, info: ValidationInfo) -> "AekoInventoryEmission":
+    def matches_the_row_kind_and_catalogs(
+        self, info: ValidationInfo
+    ) -> "AekoInventoryEmission":
         """
         Enforce emission vs reduction rules and catalog membership.
 
@@ -476,42 +533,59 @@ class AekoInventoryEmission(BaseModel):
                 self.scope,
                 self.is_upstream,
             )
+
             if any(value is not None for value in extras):
                 raise ValueError("reduction rows must leave extra fields as null")
+
             if self.category is None:
                 raise ValueError("reduction rows require a category id")
+
             category_ids = catalogs.get("category_ids")
+
             if category_ids is not None and self.category not in category_ids:
                 raise ValueError("category id is not in the categories catalog")
+
             return self
 
         if self.quantity_co2e < 0:
             raise ValueError("quantity_co2e must be >= 0 for an emission")
+
         if self.gas is None or self.scope is None or self.category is None:
             raise ValueError("emission rows require gas, scope and category ids")
 
         gas_ids = catalogs.get("gas_ids")
+
         scope_ids = catalogs.get("scope_ids")
+
         category_ids = catalogs.get("category_ids")
+
         classifications = catalogs.get("classifications")
 
         if gas_ids is not None and self.gas not in gas_ids:
             raise ValueError("gas id is not in the gases catalog")
+
         if scope_ids is not None and self.scope not in scope_ids:
             raise ValueError("scope id is not in the scopes catalog")
+
         if category_ids is not None and self.category not in category_ids:
             raise ValueError("category id is not in the categories catalog")
 
         if classifications is not None:
             classification = classifications.get(self.category)
+
             if classification == "UPSTREAM":
                 expected: bool | None = True
+
             elif classification == "DOWNSTREAM":
                 expected = False
+
             else:
                 expected = None
+
             if self.is_upstream is not expected:
-                raise ValueError("is_upstream does not match the category classification")
+                raise ValueError(
+                    "is_upstream does not match the category classification"
+                )
 
         return self
 
@@ -540,8 +614,11 @@ class AekoExtractedInventory(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str | None = None
+
     start_period: str | None = None
+
     end_period: str | None = None
+
     emissions: list[AekoInventoryEmission] = Field(default_factory=list)
 
     @field_validator("description")
@@ -562,6 +639,7 @@ class AekoExtractedInventory(BaseModel):
 
         if value is not None and len(value) > 150:
             raise ValueError("description must be at most 150 characters")
+
         return value
 
     @field_validator("start_period", "end_period")
@@ -582,12 +660,16 @@ class AekoExtractedInventory(BaseModel):
 
         if value is None:
             return value
+
         if len(value) != 10:
             raise ValueError("periods must be ISO 8601 dates (YYYY-MM-DD)")
+
         try:
             date.fromisoformat(value)
+
         except ValueError as exc:
             raise ValueError("periods must be ISO 8601 dates (YYYY-MM-DD)") from exc
+
         return value
 
     @model_validator(mode="after")
@@ -602,8 +684,13 @@ class AekoExtractedInventory(BaseModel):
             ValueError: If both dates are present and `end_period` is earlier.
         """
 
-        if self.start_period and self.end_period and self.end_period < self.start_period:
+        if (
+            self.start_period
+            and self.end_period
+            and self.end_period < self.start_period
+        ):
             raise ValueError("end_period must be on or after start_period")
+
         return self
 
 
@@ -622,6 +709,7 @@ class AekoSummaryResponse(BaseModel):
     """
 
     summary: str
+
     aeko_metrics: AekoMetrics
 
 
@@ -645,5 +733,7 @@ class AekoAnalysisResponse(BaseModel):
     """
 
     plan: AekoImprovementPlan
+
     inventory: AekoExtractedInventory
+
     aeko_metrics: AekoMetrics

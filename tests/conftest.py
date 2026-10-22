@@ -7,31 +7,42 @@ free, and runnable without credentials.
 """
 
 import json
+
 from typing import Any
 
+
 import pytest
+
 from langchain_core.language_models.chat_models import BaseChatModel
+
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+
 from langchain_core.outputs import ChatGeneration, ChatResult
+
 from langchain_core.runnables import Runnable
 
+
 from aeko.config.aeko import Aeko
+
 from aeko.engine.runtime import RUNTIME
 
-# Every agent's system prompt states its identity in this exact shape (see
-# `_render_instructions` in aeko/engine/prompts/builder.py), which is what
-# lets one fake model answer as whichever agent is calling it.
+
 PERSONA_MARKER = "Voce é o agente: "
+
 
 DEFAULT_FAKE_RESPONSE = "Resposta simulada.\nNext agent: Nenhum"
 
+
 DEFAULT_GASES = [{"id": 1, "name": "CO2"}]
+
 DEFAULT_SCOPES = [{"id": 1, "name": "Escopo 1"}]
+
 DEFAULT_CATEGORIES = [
     {"id": 1, "name": "Combustao estacionaria", "classification": None},
     {"id": 2, "name": "Bens e servicos adquiridos", "classification": "UPSTREAM"},
     {"id": 3, "name": "Transporte e distribuicao", "classification": "DOWNSTREAM"},
 ]
+
 
 EMPTY_EXTRACTED_INVENTORY = {
     "description": None,
@@ -57,7 +68,9 @@ def catalog_kwargs(**overrides) -> dict:
         "scopes": list(DEFAULT_SCOPES),
         "categories": list(DEFAULT_CATEGORIES),
     }
+
     kwargs.update(overrides)
+
     return kwargs
 
 
@@ -91,10 +104,14 @@ def with_extracted_inventory(answer: str, payload: dict | None = None) -> str:
     """
 
     block = extracted_inventory_block(payload)
+
     marker = "Next agent:"
+
     if marker in answer:
         body, rest = answer.rsplit(marker, 1)
+
         return f"{body.rstrip()}\n\n{block}\n{marker}{rest}"
+
     return f"{answer}\n\n{block}"
 
 
@@ -109,7 +126,9 @@ def agent_name_from(messages: list[BaseMessage]) -> str:
         str: The agent's name, or an empty string when it can't be determined.
     """
 
-    system_content = next((m.content for m in messages if isinstance(m, SystemMessage)), "")
+    system_content = next(
+        (m.content for m in messages if isinstance(m, SystemMessage)), ""
+    )
 
     if PERSONA_MARKER not in system_content:
         return ""
@@ -140,24 +159,41 @@ class FakeChatModel(BaseChatModel):
     """
 
     responses: dict[str, str | list[str]] = {}
+
     default_response: str = DEFAULT_FAKE_RESPONSE
+
     failing_models: tuple[str, ...] = ()
+
     model: str = "fake-model"
+
     usage_input_tokens: int = 11
+
     usage_output_tokens: int = 7
+
     calls: list[tuple[str, str]] = []
+
     system_prompts: dict[str, str] = {}
 
-    def _generate(self, messages: list[BaseMessage], stop: list[str] | None = None,
-                  run_manager: Any = None, **kwargs: Any) -> ChatResult:
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Generate."""
         if self.model in self.failing_models:
             raise RuntimeError(f"model {self.model} is unavailable")
 
         agent = agent_name_from(messages)
+
         human = next(
-            (m.content for m in reversed(messages) if not isinstance(m, SystemMessage)), ""
+            (m.content for m in reversed(messages) if not isinstance(m, SystemMessage)),
+            "",
         )
+
         self.calls.append((agent, str(human)))
+
         self.system_prompts[agent] = str(
             next((m.content for m in messages if isinstance(m, SystemMessage)), "")
         )
@@ -166,13 +202,11 @@ class FakeChatModel(BaseChatModel):
 
         if isinstance(scripted, list):
             answered = sum(1 for name, _ in self.calls if name == agent)
+
             scripted = scripted[min(answered - 1, len(scripted) - 1)]
 
         content = scripted.replace("{agent}", agent)
 
-        # Both `usage_metadata` and a `model_name` are required for LangChain's
-        # usage callback to record the call, which is what fills the tokens and
-        # the model name of the agent's entry in a request's event tracking.
         message = AIMessage(
             content=content,
             usage_metadata={
@@ -185,11 +219,15 @@ class FakeChatModel(BaseChatModel):
 
         return ChatResult(generations=[ChatGeneration(message=message)])
 
-    def bind_tools(self, tools, *, tool_choice: str | None = None, **kwargs: Any) -> Runnable:
+    def bind_tools(
+        self, tools, *, tool_choice: str | None = None, **kwargs: Any
+    ) -> Runnable:
+        """Bind tools."""
         return self
 
     @property
     def _llm_type(self) -> str:
+        """Llm type."""
         return "fake-chat-model"
 
     def prompt_for(self, agent: str) -> str:
@@ -228,6 +266,7 @@ class FakeChatModel(BaseChatModel):
         """
 
         seen = []
+
         for name, _ in self.calls:
             if name not in seen:
                 seen.append(name)
@@ -245,7 +284,9 @@ def reset_aeko():
     """
 
     Aeko.reset()
+
     yield
+
     Aeko.reset()
 
 
@@ -263,11 +304,15 @@ def use_fake_llm(monkeypatch):
     """
 
     def _use(responses: dict[str, str] | None = None, **kwargs: Any) -> FakeChatModel:
+        """Use."""
         fake = FakeChatModel(responses=responses or {}, **kwargs)
+
         monkeypatch.setattr(
             "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fake, fake)
         )
+
         RUNTIME.agents.clear()
+
         return fake
 
     yield _use
@@ -290,7 +335,9 @@ def use_agents():
     """
 
     def _use(agents: dict[str, Any]) -> dict[str, Any]:
+        """Use."""
         RUNTIME.agents[RUNTIME.max_tokens] = agents
+
         return agents
 
     return _use

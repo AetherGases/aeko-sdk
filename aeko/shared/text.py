@@ -2,7 +2,8 @@
 
 import unicodedata
 
-ROUTING_MARKER = "Next agent: "
+
+from aeko.shared.constants import ROUTING_MARKER
 
 
 def next_agent_name(text: str) -> str:
@@ -50,7 +51,9 @@ def strip_routing_marker(text: str) -> str:
         return text
 
     before, after = text.rsplit(ROUTING_MARKER, 1)
+
     remainder = "\n".join(after.splitlines()[1:]).strip()
+
     body = before.rstrip()
 
     if remainder:
@@ -76,7 +79,9 @@ def _comparable(label: str) -> str:
 
     decomposed = unicodedata.normalize("NFKD", label.strip())
 
-    return "".join(char for char in decomposed if not unicodedata.combining(char)).casefold()
+    return "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    ).casefold()
 
 
 def _heading_in(line: str) -> str | None:
@@ -129,15 +134,19 @@ def parse_sections(text: str, labels: dict[str, str]) -> dict[str, str]:
     wanted = {_comparable(label): name for name, label in labels.items()}
 
     found: dict[str, list[str]] = {}
+
     current: str | None = None
 
     for line in text.splitlines():
         heading = _heading_in(line)
+
         name = wanted.get(_comparable(heading)) if heading is not None else None
 
         if name is not None:
             current = name
+
             found.setdefault(name, [])
+
         elif current is not None:
             found[current].append(line)
 

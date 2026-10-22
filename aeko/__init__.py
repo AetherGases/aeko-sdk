@@ -2,6 +2,7 @@
 
 __version__ = "3.5.1"
 
+
 from aeko.config import (
     AGENT_NAMES,
     Aeko,
@@ -26,7 +27,9 @@ from aeko.config import (
     MalformedAgentOutputError,
     UnknownAgentError,
 )
+
 from aeko.shared import AekoAgentMetrics, AekoMetrics
+
 
 __all__ = [
     "__version__",

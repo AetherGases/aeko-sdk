@@ -2,8 +2,11 @@
 
 from typing import Any, Sequence
 
-from aeko.config._text import strip_routing_marker
-from aeko.engine._content import text_of
+
+from aeko.engine.runtime import RUNTIME, text_of
+
+from aeko.shared.text import strip_routing_marker
+
 from aeko.config.dto import (
     AekoMessage,
     AekoMessageResponse,
@@ -13,17 +16,26 @@ from aeko.config.dto import (
     AekoUser,
     AekoUserMemory,
 )
-from aeko.config.exceptions import MalformedAgentOutputError, UnknownAgentError
-from aeko.engine.graph.builder import get_app
-from aeko.engine.graph.state import create_initial_state
-from aeko.engine.prompts import AGENT_NAMES
-from aeko.engine.runtime import RUNTIME
-from aeko.shared import Flow, log_failure, log_success, processing
-from aeko.config.constants import MEMORIES_LABEL, MESSENGER_LOG_MODULE, SESSION_HISTORY_USAGE
-from aeko.side_content.constants import SUMMARY_LOG_MODULE
-from aeko.side_content.summary import generate_conversation_summary
 
-LOG_MODULE = MESSENGER_LOG_MODULE
+from aeko.config.exceptions import MalformedAgentOutputError, UnknownAgentError
+
+from aeko.engine.graph.builder import get_app
+
+from aeko.engine.graph.state import create_initial_state
+
+from aeko.engine.prompts import AGENT_NAMES
+
+from aeko.shared import Flow, log_failure, log_success, processing
+
+from aeko.config.constants import (
+    MEMORIES_LABEL,
+    MESSENGER_LOG_MODULE,
+    SESSION_HISTORY_USAGE,
+)
+
+from aeko.side_content.constants import SUMMARY_LOG_MODULE
+
+from aeko.side_content.summary import generate_conversation_summary
 
 
 def _final_answer(result: dict) -> str:
@@ -45,11 +57,17 @@ def _final_answer(result: dict) -> str:
     """
 
     messages = result.get("messages") or []
+
     if not messages:
         return ""
 
     final = messages[-1]
-    content = final.get("content", "") if isinstance(final, dict) else getattr(final, "content", "")
+
+    content = (
+        final.get("content", "")
+        if isinstance(final, dict)
+        else getattr(final, "content", "")
+    )
 
     return strip_routing_marker(text_of(content))
 
@@ -70,15 +88,20 @@ def _agents_called(result: dict) -> list[str]:
     called = list(result.get("previous_agents") or {})
 
     messages = result.get("messages") or []
+
     if messages:
         final = messages[-1]
-        name = final.get("name") if isinstance(final, dict) else getattr(final, "name", None)
+
+        name = (
+            final.get("name")
+            if isinstance(final, dict)
+            else getattr(final, "name", None)
+        )
+
         if name and name not in called:
             called.append(name)
 
     return called
-
-
 
 
 def _history_from(session: AekoSession) -> str:
@@ -110,12 +133,11 @@ def _history_from(session: AekoSession) -> str:
 
     for turn in session.messages[-SESSION_HISTORY_USAGE:]:
         lines.append(f"Usuário: {turn.input}")
+
         if turn.output:
             lines.append(f"Assistente: {turn.output}")
 
     return "\n".join(lines)
-
-
 
 
 def _memories_context(memories: Sequence[AekoUserMemory]) -> str:
@@ -160,7 +182,9 @@ class AekoMessenger:
     read back into a run (see `SESSION_HISTORY_USAGE`).
     """
 
-    def __init__(self, user: AekoUser, memories: Sequence[AekoUserMemory] | None = None):
+    def __init__(
+        self, user: AekoUser, memories: Sequence[AekoUserMemory] | None = None
+    ):
         """
         Open a messenger on behalf of a given user.
 
@@ -176,6 +200,7 @@ class AekoMessenger:
         """
 
         self._user = user
+
         self._memories = list(memories or [])
 
     def _context(self) -> str:
@@ -211,12 +236,14 @@ class AekoMessenger:
         """
 
         normalized: dict[str, list[AekoTool]] = {}
+
         for agent, agent_tools in tools.items():
             if agent not in AGENT_NAMES:
                 log_failure(
-                    LOG_MODULE,
+                    MESSENGER_LOG_MODULE,
                     f"Tool registration refused: {agent!r} is not an agent of the system.",
                 )
+
                 raise UnknownAgentError(agent, AGENT_NAMES)
 
             normalized[agent] = [AekoTool.wrap(tool) for tool in agent_tools]
@@ -226,14 +253,16 @@ class AekoMessenger:
         registered = ", ".join(
             f"{agent}={len(agent_tools)}" for agent, agent_tools in normalized.items()
         )
+
         log_success(
-            LOG_MODULE,
+            MESSENGER_LOG_MODULE,
             f"Tools registered for {len(normalized)} agent(s)"
             + (f": {registered}" if registered else "."),
         )
 
-    def send_message(self, message: str, session: AekoSession, *,
-                     id_request: str) -> AekoMessageResponse:
+    def send_message(
+        self, message: str, session: AekoSession, *, id_request: str
+    ) -> AekoMessageResponse:
         """
         Send a user message through the graph and return the reviewed answer.
 
@@ -274,9 +303,11 @@ class AekoMessenger:
             history=_history_from(session),
         )
 
-        with processing(Flow.CONVERSATIONAL, LOG_MODULE, id_request) as run:
+        with processing(Flow.CONVERSATIONAL, MESSENGER_LOG_MODULE, id_request) as run:
             run.item("session", session.id or "-")
+
             run.item("user", session.id_user or "-")
+
             run.item(
                 "input",
                 f"{len(message)} characters, {len(session.messages)} history turns",
@@ -296,10 +327,13 @@ class AekoMessenger:
             turn = AekoMessage(input=message, output=answer)
 
             session.messages.append(turn)
+
             session.updated_at = turn.submitted_at
 
             agents_called = _agents_called(result)
+
             approved = bool(result.get("guard_rail_approved"))
+
             guardrail_retries = int(result.get("guard_rail_retries", 0))
 
         return AekoMessageResponse(
@@ -312,8 +346,9 @@ class AekoMessenger:
             guardrail_retries=guardrail_retries,
         )
 
-    def generate_summary(self, messages: Sequence[AekoMessage], *,
-                         id_request: str) -> AekoSummaryResponse:
+    def generate_summary(
+        self, messages: Sequence[AekoMessage], *, id_request: str
+    ) -> AekoSummaryResponse:
         """
         Summarize a conversation window through the lonely summarizer agent.
 

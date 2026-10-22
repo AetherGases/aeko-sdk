@@ -1,7 +1,12 @@
+"""Chat-model factory for the fast and slow Gemini backends."""
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+
 from aeko.engine.runtime import RUNTIME
+
 from aeko.engine.constants import DEFAULT_TEMPERATURE, DEFAULT_TOP_K, DEFAULT_TOP_P
+
 
 def create_llms(max_tokens: int | None = None):
     """
@@ -27,8 +32,11 @@ def create_llms(max_tokens: int | None = None):
     """
 
     api_key = RUNTIME.require_api_key()
+
     fast_model = RUNTIME.fast_model
+
     slow_model = RUNTIME.slow_model
+
     max_tokens = max_tokens or RUNTIME.max_tokens
 
     fast_llm = ChatGoogleGenerativeAI(
@@ -50,6 +58,7 @@ def create_llms(max_tokens: int | None = None):
     )
 
     fast_llm_with_fallback = fast_llm.with_fallbacks([slow_llm])
+
     slow_llm_with_fallback = slow_llm.with_fallbacks([fast_llm])
 
     return fast_llm_with_fallback, slow_llm_with_fallback

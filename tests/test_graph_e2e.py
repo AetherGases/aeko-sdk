@@ -8,13 +8,15 @@ the previous API-backed version did, minus the network.
 
 from pathlib import Path
 
+
 import pytest
 
+
 from aeko.engine.graph.builder import get_app
+
 from aeko.engine.graph.state import create_initial_state
 
-# Compatible with Aether's domain: GHG inventory / gas transition for industry (see
-# aeko/engine/prompts/router.py and report_analyst.py for similar examples).
+
 INITIAL_QUESTION = (
     "Sou gestor ambiental de uma fabrica de ceramica e trouxe o inventario GHG de 2023: "
     "emissoes de CO2 dos fornos a gas natural (1.200 toneladas) e consumo de eletricidade "
@@ -22,14 +24,16 @@ INITIAL_QUESTION = (
     "gases verdes poderiam substituir o gas natural nos meus fornos a 1.200 graus Celsius."
 )
 
+
 RESULT_FILE = Path(__file__).resolve().parent.parent / "result.txt"
+
 
 CONSOLIDATED_ANSWER = (
     "Seu inventario soma 1.600 tCO2e. Os fornos a gas natural concentram o risco "
     "ambiental, e o hidrogenio verde e a substituicao viavel para 1.200 graus Celsius."
 )
 
-# The full happy path: router -> both specialists -> orchestrator -> guardrail.
+
 FULL_FLOW = {
     "Roteador": "Encaminhando para analise tecnica.\nNext agent: Analista de Poluentes",
     "Analista de Poluentes": (
@@ -43,13 +47,13 @@ FULL_FLOW = {
     "Verificador de Resposta": "Aprovado. Responde ao que foi pedido.\nNext agent: Nenhum",
 }
 
-# Same flow, but the guardrail never lets the draft through.
+
 REJECTING_FLOW = {
     **FULL_FLOW,
     "Guardrail de Saída": "Reprovado. Faltam dados de escopo 3.\nNext agent: Nenhum",
 }
 
-# The draft clears the guardrail and is caught by the response checker instead.
+
 CHECKER_REJECTING_FLOW = {
     **FULL_FLOW,
     "Verificador de Resposta": (
@@ -58,7 +62,7 @@ CHECKER_REJECTING_FLOW = {
     ),
 }
 
-# The report entry point: inventory analyst -> pollutants -> continuous improvement.
+
 INVENTORY_FLOW = {
     "Análista de inventários": (
         "Escopo 1 = 1.200 tCO2e, Escopo 2 = 400 tCO2e.\nNext agent: Analista de Poluentes"
@@ -71,7 +75,9 @@ INVENTORY_FLOW = {
 
 
 def _final_content(result) -> str:
+    """Final content."""
     final = result["messages"][-1]
+
     return final.content if hasattr(final, "content") else final["content"]
 
 
@@ -79,25 +85,27 @@ def _final_content(result) -> str:
 def run_graph(use_fake_llm):
     """Run the compiled graph against a scripted model, and return its state."""
 
-    def _run(responses, question=INITIAL_QUESTION, entry_point="Roteador", **state_kwargs):
+    def _run(
+        responses, question=INITIAL_QUESTION, entry_point="Roteador", **state_kwargs
+    ):
+        """Run."""
         llm = use_fake_llm(responses)
+
         state = create_initial_state(question, **state_kwargs)
+
         result = get_app().invoke(
             state, config={"configurable": {"entry_point": entry_point}}
         )
+
         return result, llm
 
     return _run
 
 
 def test_graph_invocation_writes_result_to_file(run_graph):
+    """Graph invocation writes result to file."""
     result, _ = run_graph(FULL_FLOW)
 
-    # Only a terminal node (the FAQ, or the coordinator of the report flow)
-    # and an approved response check write to "messages" (see nodes.py). If the run ends
-    # without ever reaching one of those - e.g. the guardrail rejects past the
-    # retry cap - "messages" stays empty, and there is no real final answer
-    # to report.
     assert result["messages"], (
         "O grafo terminou sem produzir uma resposta final aprovada "
         "(guardrail provavelmente reprovou ate o limite de retries)."
@@ -112,24 +120,27 @@ def test_graph_invocation_writes_result_to_file(run_graph):
         "Resposta final:",
         final_content,
     ]
+
     RESULT_FILE.write_text("\n".join(report_lines), encoding="utf-8")
 
     assert final_content
+
     assert RESULT_FILE.exists()
 
 
 def test_approved_answer_is_the_orchestrators_draft(run_graph):
+    """Approved answer is the orchestrators draft."""
     result, _ = run_graph(FULL_FLOW)
 
     assert result["guard_rail_approved"] is True
+
     assert result["guard_rail_retries"] == 0
-    # The graph stores the agent's raw output, routing marker and all; it is
-    # the SDK facade that strips it before the answer reaches a caller (see
-    # tests/test_config.py::test_answer_is_free_of_the_routing_marker).
+
     assert _final_content(result).startswith(CONSOLIDATED_ANSWER)
 
 
 def test_every_specialist_contributes_before_consolidation(run_graph):
+    """Every specialist contributes before consolidation."""
     result, llm = run_graph(FULL_FLOW)
 
     assert llm.agents_called() == [
@@ -140,49 +151,65 @@ def test_every_specialist_contributes_before_consolidation(run_graph):
         "Guardrail de Saída",
         "Verificador de Resposta",
     ]
+
     assert "Analista de Poluentes" in result["previous_agents"]
+
     assert "Analista de Gases Verdes" in result["previous_agents"]
 
 
 def test_specialist_findings_reach_the_orchestrator(run_graph):
+    """Specialist findings reach the orchestrator."""
     _, llm = run_graph(FULL_FLOW)
 
     orchestrator_prompt = llm.prompt_for("Orquestrador")
 
     assert "Análises recebidas até agora" in orchestrator_prompt
+
     assert "Hidrogenio verde atende" in orchestrator_prompt
 
 
 def test_company_context_reaches_the_first_agent(run_graph):
-    _, llm = run_graph(FULL_FLOW, company_context="Ceramica X, relatorio de 2022: 2.100 tCO2e.")
+    """Company context reaches the first agent."""
+    _, llm = run_graph(
+        FULL_FLOW, company_context="Ceramica X, relatorio de 2022: 2.100 tCO2e."
+    )
 
     assert "Ceramica X" in llm.prompt_for("Roteador")
 
 
 def test_rejected_answer_never_reaches_the_user(run_graph):
+    """Rejected answer never reaches the user."""
     result, _ = run_graph(REJECTING_FLOW)
 
     assert result["guard_rail_approved"] is False
+
     assert not result["messages"], "um rascunho reprovado nao pode virar resposta"
 
 
 def test_guardrail_retries_are_capped(run_graph):
+    """Guardrail retries are capped."""
     result, _ = run_graph(REJECTING_FLOW)
 
     assert result["guard_rail_retries"] == 2, "duas reprovacoes e o run desiste"
-    assert result["guard_rail_requested_changes"], "o feedback do guardrail deve ser registrado"
+
+    assert result["guard_rail_requested_changes"], (
+        "o feedback do guardrail deve ser registrado"
+    )
 
 
 def test_guardrail_feedback_is_sent_back_to_the_router(run_graph):
+    """Guardrail feedback is sent back to the router."""
     _, llm = run_graph(REJECTING_FLOW)
 
     assert "Pontos apontados pelo Guardrail de Saída" in llm.prompt_for("Roteador")
 
 
 def test_an_approved_draft_is_only_delivered_after_the_response_checker(run_graph):
+    """An approved draft is only delivered after the response checker."""
     result, _ = run_graph(FULL_FLOW)
 
     assert result["response_check_approved"] is True
+
     assert _final_content(result).startswith(CONSOLIDATED_ANSWER), (
         "a resposta entregue segue sendo o rascunho do Orquestrador"
     )
@@ -199,33 +226,43 @@ def test_the_guardrail_alone_does_not_deliver_an_answer(run_graph):
     result, _ = run_graph(CHECKER_REJECTING_FLOW)
 
     assert result["guard_rail_approved"] is True
+
     assert result["response_check_approved"] is False
-    assert not result["messages"], "uma resposta reprovada pelo verificador nao e entregue"
+
+    assert not result["messages"], (
+        "uma resposta reprovada pelo verificador nao e entregue"
+    )
 
 
 def test_response_check_retries_are_capped(run_graph):
+    """Response check retries are capped."""
     result, _ = run_graph(CHECKER_REJECTING_FLOW)
 
     assert result["response_check_retries"] == 2, "duas reprovacoes e o run desiste"
+
     assert result["response_check_requested_changes"]
 
 
 def test_response_check_feedback_is_sent_back_to_the_router(run_graph):
+    """Response check feedback is sent back to the router."""
     _, llm = run_graph(CHECKER_REJECTING_FLOW)
 
     assert "Pontos apontados pelo Verificador de Resposta" in llm.prompt_for("Roteador")
 
 
 def test_the_response_checker_reads_the_question_and_the_answer(run_graph):
+    """The response checker reads the question and the answer."""
     _, llm = run_graph(FULL_FLOW)
 
     prompt = llm.prompt_for("Verificador de Resposta")
 
     assert "gases verdes poderiam substituir" in prompt, "o que foi pedido"
+
     assert CONSOLIDATED_ANSWER in prompt, "o que foi gerado"
 
 
 def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
+    """Inventory entry point ends at the improvement coordinator."""
     result, llm = run_graph(
         INVENTORY_FLOW,
         question="| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |",
@@ -237,8 +274,11 @@ def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
         "Analista de Poluentes",
         "Coordenador de Melhoria Contínua",
     ]
+
     assert _final_content(result).startswith("Plano:")
+
     assert result["guard_rail_approved"] is False, "este fluxo nao passa pelo guardrail"
+
     assert "Verificador de Resposta" not in llm.agents_called(), (
         "o verificador e do fluxo conversacional"
     )
@@ -246,8 +286,7 @@ def test_inventory_entry_point_ends_at_the_improvement_coordinator(run_graph):
 
 INVENTORY_PLAN = "Plano: trocar os queimadores.\nNext agent: Nenhum"
 
-# A chat question the router sends to the coordinator: the plan is a finding
-# for the Orquestrador, never the answer the user reads.
+
 CHAT_PLAN_FLOW = {
     "Roteador": "Pedido de otimizacao.\nNext agent: Coordenador de Melhoria Contínua",
     "Coordenador de Melhoria Contínua": (
@@ -261,6 +300,7 @@ CHAT_PLAN_FLOW = {
 
 
 def test_a_plan_asked_for_in_a_chat_is_consolidated_not_delivered_raw(run_graph):
+    """A plan asked for in a chat is consolidated not delivered raw."""
     result, llm = run_graph(CHAT_PLAN_FLOW)
 
     assert llm.agents_called() == [
@@ -270,25 +310,31 @@ def test_a_plan_asked_for_in_a_chat_is_consolidated_not_delivered_raw(run_graph)
         "Guardrail de Saída",
         "Verificador de Resposta",
     ]
+
     assert _final_content(result).startswith(CONSOLIDATED_ANSWER)
+
     assert "## Problema definido" not in _final_content(result), (
         "as secoes sao o formato do documento do Coordenador, nao de uma resposta de chat"
     )
 
 
 def test_the_plan_reaches_the_orchestrator_as_a_finding(run_graph):
+    """The plan reaches the orchestrator as a finding."""
     _, llm = run_graph(CHAT_PLAN_FLOW)
 
     prompt = llm.prompt_for("Orquestrador")
 
     assert "Análises recebidas até agora" in prompt
+
     assert "Trocar os queimadores." in prompt
 
 
 @pytest.mark.parametrize(
     "conversational", ["Orquestrador", "Roteador", "FAQ", "Guardrail de Saída"]
 )
-def test_the_inventory_analyst_cannot_hand_the_report_flow_over(run_graph, conversational):
+def test_the_inventory_analyst_cannot_hand_the_report_flow_over(
+    run_graph, conversational
+):
     """
     The report flow ends at the coordinator even when an analyst says otherwise.
 
@@ -311,10 +357,12 @@ def test_the_inventory_analyst_cannot_hand_the_report_flow_over(run_graph, conve
         "Análista de inventários",
         "Coordenador de Melhoria Contínua",
     ]
+
     assert _final_content(result).startswith("Plano:")
 
 
 def test_a_report_analyst_cannot_hand_the_report_flow_over(run_graph):
+    """A report analyst cannot hand the report flow over."""
     result, llm = run_graph(
         {
             "Análista de inventários": "Escopo 1 = 1.200 tCO2e.\nNext agent: Analista de Poluentes",
@@ -326,11 +374,15 @@ def test_a_report_analyst_cannot_hand_the_report_flow_over(run_graph):
     )
 
     assert "FAQ" not in llm.agents_called()
+
     assert _final_content(result).startswith("Plano:")
 
 
-@pytest.mark.parametrize("analyst", ["Analista de Poluentes", "Analista de Gases Verdes"])
+@pytest.mark.parametrize(
+    "analyst", ["Analista de Poluentes", "Analista de Gases Verdes"]
+)
 def test_an_analyst_naming_itself_does_not_kill_the_report_flow(run_graph, analyst):
+    """An analyst naming itself does not kill the report flow."""
     result, llm = run_graph(
         {
             "Análista de inventários": f"Escopo 1 = 1.200 tCO2e.\nNext agent: {analyst}",
@@ -346,20 +398,26 @@ def test_an_analyst_naming_itself_does_not_kill_the_report_flow(run_graph, analy
         analyst,
         "Coordenador de Melhoria Contínua",
     ]
+
     assert _final_content(result).startswith("Plano:")
 
 
 def test_an_analyst_naming_itself_does_not_kill_the_chat_flow(run_graph):
-    result, llm = run_graph({
-        **FULL_FLOW,
-        "Analista de Poluentes": "Emissoes criticas.\nNext agent: Analista de Poluentes",
-    })
+    """An analyst naming itself does not kill the chat flow."""
+    result, llm = run_graph(
+        {
+            **FULL_FLOW,
+            "Analista de Poluentes": "Emissoes criticas.\nNext agent: Analista de Poluentes",
+        }
+    )
 
     assert "Orquestrador" in llm.agents_called()
+
     assert _final_content(result).startswith(CONSOLIDATED_ANSWER)
 
 
 def test_the_chat_flow_still_reaches_the_orchestrator(run_graph):
+    """The chat flow still reaches the orchestrator."""
     _, llm = run_graph(FULL_FLOW)
 
     assert "Orquestrador" in llm.agents_called(), (

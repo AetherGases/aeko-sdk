@@ -45,8 +45,12 @@ class UnknownAgentError(AekoError):
     """Raised when tools are registered for an agent name that doesn't exist."""
 
     def __init__(self, agent: str, known_agents: tuple[str, ...]):
+        """Record the unknown name and the names the SDK does know."""
+
         self.agent = agent
+
         self.known_agents = known_agents
+
         super().__init__(
             f"'{agent}' is not a known agent. Valid names: {', '.join(known_agents)}."
         )

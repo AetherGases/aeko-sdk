@@ -19,6 +19,7 @@ Orquestração observável: `analyze()` depois do grafo.
 ```python
 INVENTORY_SCHEMA_MAX_RETRIES = 2
 
+
 def recover_extracted_inventory(
     answer: str,
     catalogs: AekoInventoryCatalogs,

@@ -1,29 +1,11 @@
+"""ANSI colors for log lines, without a rendering-library dependency."""
+
 from __future__ import annotations
 
+
+from aeko.shared.constants import BLUE, FLOW_COLORS, LIGHT_BLUE, RED, RESET
+
 from aeko.shared.context import Flow
-
-# The ANSI escapes the log lines are painted with. Kept as plain constants
-# rather than a dependency on a color library: one escape per color is the
-# whole of what this needs, and a logging package that pulls in a rendering
-# library is a package a consumer cannot install without it.
-RESET = "\033[0m"
-
-# Failure, whatever the flow: a run that died is never blue.
-RED = "\033[31m"
-
-# Success. The report flow — and SDK configuration, which belongs to no flow —
-# take the plain (dark) blue; the conversational flow takes the bright one, so
-# a chat request and a report request can be told apart at a glance in one
-# stream.
-BLUE = "\033[34m"
-LIGHT_BLUE = "\033[94m"
-
-# The shade of blue each flow's successful lines are written in. A flow absent
-# from here — or no flow at all — falls back to the plain blue.
-FLOW_COLORS: dict[Flow, str] = {
-    Flow.CONVERSATIONAL: LIGHT_BLUE,
-    Flow.REPORT: BLUE,
-}
 
 
 def success_color(flow: Flow | None = None) -> str:

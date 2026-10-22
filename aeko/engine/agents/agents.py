@@ -1,26 +1,24 @@
+"""Build the SDK's LangChain agents from prompt specs and registered tools."""
+
 from dataclasses import replace
+
 from types import SimpleNamespace
+
 from typing import Any
 
+
 from langchain.agents import create_agent
+
 from langchain_core.language_models import BaseChatModel
 
-from aeko.engine.agents.llms import create_llms
-from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
-from aeko.engine.runtime import RUNTIME
 
-# Agents that only classify, consolidate or review — cheap turns, fast model.
-# Everything else is a specialist analyst and gets the high-effort model. The
-# response checker belongs here for the same reason the guardrail does: it
-# produces no analysis of its own, only a verdict on text it was handed, and it
-# runs on every conversational turn, so its cost is paid by all of them.
-FAST_AGENTS = (
-    "Roteador",
-    "FAQ",
-    "Orquestrador",
-    "Guardrail de Saída",
-    "Verificador de Resposta",
-)
+from aeko.engine.agents.constants import FAST_AGENTS
+
+from aeko.engine.agents.llms import create_llms
+
+from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
+
+from aeko.engine.runtime import RUNTIME
 
 
 def _to_prompt_line(tool: Any) -> str:
@@ -37,7 +35,9 @@ def _to_prompt_line(tool: Any) -> str:
     if hasattr(tool, "to_prompt_line"):
         return tool.to_prompt_line()
 
-    return f"{getattr(tool, 'name', type(tool).__name__)} - {getattr(tool, 'description', '')}".rstrip(" -")
+    return f"{getattr(tool, 'name', type(tool).__name__)} - {getattr(tool, 'description', '')}".rstrip(
+        " -"
+    )
 
 
 def _to_lc_tool(tool: Any) -> Any:
@@ -58,14 +58,25 @@ class _AgentCompatibilityWrapper:
     """Keep the SDK's executor-shaped contract over a create_agent graph."""
 
     def __init__(self, graph: Any, prompt: Any, llm: BaseChatModel, tools: list[Any]):
+        """Store the graph, prompt, model and tools the SDK will invoke through."""
+
         self._graph = graph
+
         self.tools = tools
+
         self.agent = SimpleNamespace(runnable=SimpleNamespace(steps=[prompt, llm]))
 
-    def invoke(self, input: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    def invoke(
+        self, input: dict[str, Any], config: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Invoke the agent graph and expose the last message as ``output``."""
+
         result = self._graph.invoke(input, config=config)
+
         messages = result.get("messages", [])
+
         output = messages[-1].content if messages else ""
+
         return {**result, "output": output}
 
 
@@ -88,11 +99,16 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Any:
         AgentExecutor: An agent executor ready to be invoked.
     """
 
-    prompt = build_prompt(replace(spec, tools=[_to_prompt_line(tool) for tool in tools]))
+    prompt = build_prompt(
+        replace(spec, tools=[_to_prompt_line(tool) for tool in tools])
+    )
+
     lc_tools = [_to_lc_tool(tool) for tool in tools]
 
     system_message = prompt.invoke({"messages": []}).messages[0]
+
     graph = create_agent(llm, tools=lc_tools, system_prompt=system_message)
+
     return _AgentCompatibilityWrapper(graph, prompt, llm, lc_tools)
 
 
@@ -121,7 +137,9 @@ def create_agents(max_tokens: int | None = None) -> dict[str, Any]:
 
     return {
         name: _build_agent(
-            fast_llm if name in FAST_AGENTS else slow_llm, spec, RUNTIME.tools.get(name, [])
+            fast_llm if name in FAST_AGENTS else slow_llm,
+            spec,
+            RUNTIME.tools.get(name, []),
         )
         for name, spec in PROMPT_SPECS.items()
     }

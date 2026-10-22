@@ -1,4 +1,7 @@
+"""Prompt spec for the response checker."""
+
 from .builder import PromptSpec
+
 
 RESPONSE_CHECKER_SPEC = PromptSpec(
     agent="Verificador de Resposta",

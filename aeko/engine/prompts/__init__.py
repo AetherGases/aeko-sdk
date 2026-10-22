@@ -1,8 +1,10 @@
+"""Prompt specs for every agent the graph can route to."""
+
 from .builder import PromptSpec, build_prompt
+from .constants import PLAN_SECTIONS
 from .continuous_improvement_coordinator import (
     CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
     INVENTORY_PAYLOAD_INSTRUCTIONS,
-    PLAN_SECTIONS,
 )
 from .faq import FAQ_SPEC
 from .green_gases_analyst import GREEN_GASES_ANALYST_SPEC
@@ -13,14 +15,6 @@ from .report_analyst import REPORT_ANALYST_SPEC
 from .response_checker import RESPONSE_CHECKER_SPEC
 from .router import ROUTER_SPEC
 
-# Keyed by each spec's own `agent` field, which is exactly the name the graph
-# routes by (see aeko/engine/graph/builder.py) and the key `create_agents()`
-# registers the agent under. Keeping a single source for that name is what lets
-# `AekoMessenger.set_tools()` accept agent names and reach the right prompt.
-#
-# The specs are the only thing exported: a prompt is always built from one at
-# agent-build time (see `_build_agent`), since its tool section depends on the
-# tools registered for that agent.
 PROMPT_SPECS: dict[str, PromptSpec] = {
     spec.agent: spec
     for spec in (

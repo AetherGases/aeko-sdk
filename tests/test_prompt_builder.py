@@ -1,11 +1,18 @@
+"""tests/test_prompt_builder.py."""
+
 import time
 
+
 from langchain_core.messages import HumanMessage
+
 from langchain_core.prompts import ChatPromptTemplate
+
 
 import pytest
 
-from aeko.config._text import parse_sections
+
+from aeko.shared.text import parse_sections
+
 from aeko.engine.prompts import (
     AGENT_NAMES,
     CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC,
@@ -13,71 +20,109 @@ from aeko.engine.prompts import (
     PROMPT_SPECS,
     builder,
 )
+
 from aeko.engine.prompts.builder import build_prompt
 
 
 def _system_content(prompt_template: ChatPromptTemplate) -> str:
+    """System content."""
     messages = prompt_template.format_messages(messages=[])
+
     return "\n\n".join(m.content for m in messages if m.type == "system")
 
 
 def test_build_prompt_supports_kwargs_and_preserves_titles():
-    prompt_template = build_prompt(agent="FAQ", scope="Responder dúvidas", tasks=["responder"], tools=["busca"], next_agents=["router"])
+    """Build prompt supports kwargs and preserves titles."""
+    prompt_template = build_prompt(
+        agent="FAQ",
+        scope="Responder dúvidas",
+        tasks=["responder"],
+        tools=["busca"],
+        next_agents=["router"],
+    )
 
     assert isinstance(prompt_template, ChatPromptTemplate)
 
     system_content = _system_content(prompt_template)
 
     assert "# Contexto Inicial" in system_content
+
     assert "# Contexto Temporal" in system_content
+
     assert "# Escopo" in system_content
+
     assert "# Persona" in system_content
+
     assert "# Tarefas" in system_content
+
     assert "# Ferramentas Disponiveis" in system_content
+
     assert "# Agentes disponiveis" in system_content
+
     assert "# Formato da Resposta" in system_content
+
     assert "Responder dúvidas" in system_content
+
     assert "- responder" in system_content
+
     assert "- busca" in system_content
+
     assert "- router" in system_content
 
 
 def test_build_prompt_instructs_next_agent_marker():
+    """Build prompt instructs next agent marker."""
     prompt_template = build_prompt(agent="FAQ", scope="Responder dúvidas")
 
     system_content = _system_content(prompt_template)
 
     assert "Next agent:" in system_content
+
     assert "Nenhum" in system_content
+
     assert "não escreva nada depois dela" in system_content
 
 
 def test_build_prompt_only_requires_messages_as_input():
+    """Build prompt only requires messages as input."""
     prompt_template = build_prompt(agent="FAQ", scope="Responder dúvidas")
 
     assert prompt_template.input_variables == ["messages"]
 
 
 def test_build_prompt_renders_shots_as_alternating_human_ai_messages():
+    """Build prompt renders shots as alternating human ai messages."""
     prompt_template = build_prompt(
         agent="FAQ",
         shots=[
             {"pergunta": "Qual a capital do Brasil?", "resposta": "Brasília"},
-            {"pergunta": "O que é hidrogênio verde?", "resposta": "Um gás produzido por eletrólise com energia renovável."},
+            {
+                "pergunta": "O que é hidrogênio verde?",
+                "resposta": "Um gás produzido por eletrólise com energia renovável.",
+            },
         ],
     )
 
     messages = prompt_template.format_messages(messages=[])
 
     shot_messages = [m for m in messages if m.type != "system"]
+
     assert [m.type for m in shot_messages] == ["human", "ai", "human", "ai"]
+
     assert shot_messages[0].content == "Qual a capital do Brasil?"
+
     assert shot_messages[1].content == "Brasília"
+
     assert shot_messages[2].content == "O que é hidrogênio verde?"
-    assert shot_messages[3].content == "Um gás produzido por eletrólise com energia renovável."
+
+    assert (
+        shot_messages[3].content
+        == "Um gás produzido por eletrólise com energia renovável."
+    )
 
 
 def test_build_prompt_without_shots_has_no_example_messages():
+    """Build prompt without shots has no example messages."""
     prompt_template = build_prompt(agent="FAQ")
 
     messages = prompt_template.format_messages(messages=[])
@@ -86,6 +131,7 @@ def test_build_prompt_without_shots_has_no_example_messages():
 
 
 def test_build_prompt_uses_a_single_leading_system_message():
+    """Build prompt uses a single leading system message."""
     prompt_template = build_prompt(
         agent="FAQ",
         shots=[{"pergunta": "Oi?", "resposta": "Olá!"}],
@@ -94,10 +140,12 @@ def test_build_prompt_uses_a_single_leading_system_message():
     messages = prompt_template.format_messages(messages=[HumanMessage("Oi, tudo bem?")])
 
     assert sum(1 for m in messages if m.type == "system") == 1
+
     assert messages[0].type == "system"
 
 
 def test_build_prompt_passes_through_runtime_messages():
+    """Build prompt passes through runtime messages."""
     prompt_template = build_prompt(agent="FAQ")
 
     messages = prompt_template.format_messages(messages=[HumanMessage("Oi, tudo bem?")])
@@ -106,7 +154,10 @@ def test_build_prompt_passes_through_runtime_messages():
 
 
 def test_build_prompt_tolerates_literal_braces_in_free_text_content():
-    prompt_template = build_prompt(agent="FAQ", scope="Custo estimado: {valor} reais, JSON: {\"a\": 1}.")
+    """Build prompt tolerates literal braces in free text content."""
+    prompt_template = build_prompt(
+        agent="FAQ", scope='Custo estimado: {valor} reais, JSON: {"a": 1}.'
+    )
 
     system_content = _system_content(prompt_template)
 
@@ -125,14 +176,20 @@ def test_every_prompt_offers_only_real_agent_names(agent):
     the run dies on precisely when the model obeys its instructions.
     """
 
-    offered = [entry.split(" - ")[0].strip() for entry in PROMPT_SPECS[agent].next_agents]
+    offered = [
+        entry.split(" - ")[0].strip() for entry in PROMPT_SPECS[agent].next_agents
+    ]
+
     unknown = [name for name in offered if name not in AGENT_NAMES]
 
     assert not unknown, f"{agent} oferece nomes que nao existem no registro: {unknown}"
 
 
 def test_the_coordinator_is_told_to_answer_in_the_plan_sections():
-    system_content = _system_content(build_prompt(CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC))
+    """The coordinator is told to answer in the plan sections."""
+    system_content = _system_content(
+        build_prompt(CONTINUOUS_IMPROVEMENT_COORDINATOR_SPEC)
+    )
 
     for label in PLAN_SECTIONS.values():
         assert f"## {label}" in system_content
@@ -149,14 +206,18 @@ def test_every_coordinator_shot_is_readable_by_the_plan_parser():
         sections = parse_sections(shot["resposta"], PLAN_SECTIONS)
 
         assert set(sections) == set(PLAN_SECTIONS)
+
         assert all(sections.values())
 
 
 def test_build_prompt_recomputes_temporal_context_on_each_render():
+    """Build prompt recomputes temporal context on each render."""
     prompt_template = builder.build_prompt(agent="FAQ")
 
     first_stamp = _system_content(prompt_template).split("Data e hora atuais: ")[1]
+
     time.sleep(1.1)
+
     second_stamp = _system_content(prompt_template).split("Data e hora atuais: ")[1]
 
     assert first_stamp != second_stamp

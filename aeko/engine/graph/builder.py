@@ -1,34 +1,25 @@
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END, START, StateGraph
+"""Assemble and compile the Aether multi-agent state graph."""
 
 from typing import Any
 
+
+from langchain_core.runnables import RunnableConfig
+
+from langgraph.graph import END, START, StateGraph
+
+
 from aeko.engine.graph import nodes
+
+from aeko.engine.graph.constants import (
+    GUARD_RAIL_MAX_RETRIES,
+    IMPROVEMENT_COORDINATOR,
+    INVENTORY_ENTRY_POINT,
+    REPORT_FLOW_ANALYSTS,
+    RESPONSE_CHECK_MAX_RETRIES,
+    RESPONSE_CHECKER,
+)
+
 from aeko.engine.graph.state import AetherGraphState
-
-# How many rejections each reviewer of the conversational flow is allowed
-# before the run gives up: the first sends the answer back to the router to be
-# rewritten, the second ends the run with nothing to deliver. A turn that has
-# been refused twice is not one more rewrite away from being right, and every
-# retry re-runs the whole flow behind it.
-GUARD_RAIL_MAX_RETRIES = 2
-RESPONSE_CHECK_MAX_RETRIES = 2
-
-# The last agent of the conversational flow: it reviews what the guardrail
-# approved, comparing what was asked with what was generated, and it is the
-# only agent of that flow whose approval delivers an answer. The report flow
-# never reaches it — its answer is a document, parsed by whoever called
-# `analyze()`, not a message to a user.
-RESPONSE_CHECKER = "Verificador de Resposta"
-
-# The report flow, as the graph knows it: entered here by `AekoInventoryAnalyzer`
-# (which owns the same name as `INVENTORY_ENTRY_POINT` — the engine cannot import
-# it from the SDK facade without a cycle), moving only between these analysts and
-# ending at this coordinator. Every other agent belongs to the conversational
-# flow, whose reviewers this one is built never to reach.
-INVENTORY_ENTRY_POINT = nodes.INVENTORY_ENTRY_POINT
-REPORT_FLOW_ANALYSTS = ("Analista de Poluentes", "Analista de Gases Verdes")
-IMPROVEMENT_COORDINATOR = "Coordenador de Melhoria Contínua"
 
 
 def _entry_router(state: AetherGraphState, config: RunnableConfig) -> str:
@@ -58,7 +49,10 @@ def _route_by_next_agent(default: str):
     """
 
     def route(state: AetherGraphState) -> str:
+        """Return the next agent name, or the given default."""
+
         next_agent = state.get("next_agent")
+
         return next_agent["agent"] if next_agent else default
 
     return route
@@ -95,13 +89,17 @@ def _route_from_analyst(default: str, *, current: str = ""):
     """
 
     def route(state: AetherGraphState, config: RunnableConfig) -> str:
+        """Return the next report-flow analyst, or the coordinator."""
+
         next_agent = state.get("next_agent")
+
         target = next_agent["agent"] if next_agent else default
 
         if target == current:
             target = default
 
         entry_point = config.get("configurable", {}).get("entry_point", "Roteador")
+
         if entry_point == INVENTORY_ENTRY_POINT and target not in REPORT_FLOW_ANALYSTS:
             return IMPROVEMENT_COORDINATOR
 
@@ -177,7 +175,10 @@ def _route_from_response_check(state: AetherGraphState) -> str:
             "Roteador".
     """
 
-    if state["response_check_approved"] or state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES:
+    if (
+        state["response_check_approved"]
+        or state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES
+    ):
         return END
 
     return "Roteador"
@@ -194,13 +195,21 @@ def build_graph() -> StateGraph:
     graph = StateGraph(AetherGraphState)
 
     graph.add_node("Roteador", nodes.roteador_node)
+
     graph.add_node("FAQ", nodes.faq_node)
+
     graph.add_node("Orquestrador", nodes.orquestrador_node)
+
     graph.add_node("Guardrail de Saída", nodes.guardrail_node)
+
     graph.add_node(RESPONSE_CHECKER, nodes.verificador_resposta_node)
+
     graph.add_node("Análista de inventários", nodes.analista_inventarios_node)
+
     graph.add_node("Analista de Poluentes", nodes.analista_poluentes_node)
+
     graph.add_node("Analista de Gases Verdes", nodes.analista_gases_verdes_node)
+
     graph.add_node("Coordenador de Melhoria Contínua", nodes.coordenador_melhoria_node)
 
     graph.add_conditional_edges(

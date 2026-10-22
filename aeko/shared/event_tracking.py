@@ -1,29 +1,25 @@
+"""Per-request event tracking for tokens, tools, agents and duration."""
+
 from __future__ import annotations
 
+
 from contextlib import contextmanager
+
 from dataclasses import dataclass, field
+
 from time import perf_counter
+
 from typing import Any, Iterator
 
+
 from langchain_core.callbacks import UsageMetadataCallbackHandler
+
 from pydantic import BaseModel, Field
 
+
+from aeko.shared.constants import EVENT_TRACKING_FLOWS, METRICS_ATTR
+
 from aeko.shared.context import Flow, current_run
-
-# The attribute a failed request's event tracking is attached to, on the way
-# out. A request that raised has no return value to carry it, and a request
-# that failed is the one the API most needs to have persisted.
-METRICS_ATTR = "aeko_metrics"
-
-# How each flow is named in what the API persists. Deliberately not `Flow.value`:
-# that wording opens the log's header line ("Conversational processing finished
-# in ..."), and the two are read by different audiences — a person scanning a
-# terminal, and a column of a database that has to go on meaning the same thing
-# across releases. Renaming one must never silently rename the other.
-EVENT_TRACKING_FLOWS = {
-    Flow.CONVERSATIONAL: "conversational",
-    Flow.REPORT: "analytical",
-}
 
 
 class AekoAgentMetrics(BaseModel):
@@ -48,9 +44,13 @@ class AekoAgentMetrics(BaseModel):
     """
 
     name: str
+
     input_tokens: int = Field(default=0, ge=0)
+
     output_tokens: int = Field(default=0, ge=0)
+
     llm: str = ""
+
     used_tools: list[str] = Field(default_factory=list)
 
 
@@ -78,9 +78,13 @@ class AekoMetrics(BaseModel):
     """
 
     id_request: str
+
     latency: int = Field(default=0, ge=0)
+
     error_description: str | None = None
+
     flow: str
+
     used_agents: list[AekoAgentMetrics] = Field(default_factory=list)
 
 
@@ -107,10 +111,12 @@ class AgentCallCollector(UsageMetadataCallbackHandler):
         """Open a collector on one agent invocation."""
 
         super().__init__()
+
         self.tools_called: list[str] = []
 
-    def on_tool_start(self, serialized: dict[str, Any], input_str: str,
-                      **kwargs: Any) -> None:
+    def on_tool_start(
+        self, serialized: dict[str, Any], input_str: str, **kwargs: Any
+    ) -> None:
         """
         Record one tool invocation, in the order the agent reached for it.
 
@@ -148,7 +154,9 @@ class AgentCallCollector(UsageMetadataCallbackHandler):
             int: The total across every model that served it.
         """
 
-        return sum(usage.get("input_tokens", 0) for usage in self.usage_metadata.values())
+        return sum(
+            usage.get("input_tokens", 0) for usage in self.usage_metadata.values()
+        )
 
     @property
     def output_tokens(self) -> int:
@@ -159,7 +167,9 @@ class AgentCallCollector(UsageMetadataCallbackHandler):
             int: The total across every model that served it.
         """
 
-        return sum(usage.get("output_tokens", 0) for usage in self.usage_metadata.values())
+        return sum(
+            usage.get("output_tokens", 0) for usage in self.usage_metadata.values()
+        )
 
 
 @dataclass
@@ -181,10 +191,15 @@ class AgentCall:
     """
 
     name: str
+
     seconds: float
+
     input_tokens: int = 0
+
     output_tokens: int = 0
+
     llm: str = ""
+
     used_tools: list[str] = field(default_factory=list)
 
     def to_metrics(self) -> AekoAgentMetrics:
@@ -234,19 +249,23 @@ def agent_call(agent_name: str) -> Iterator[AgentCallCollector]:
     """
 
     collector = AgentCallCollector()
+
     started = perf_counter()
 
     try:
         yield collector
+
     finally:
         run = current_run()
 
         if run is not None:
-            run.agent_called(AgentCall(
-                name=agent_name,
-                seconds=perf_counter() - started,
-                input_tokens=collector.input_tokens,
-                output_tokens=collector.output_tokens,
-                llm=collector.llm,
-                used_tools=list(collector.tools_called),
-            ))
+            run.agent_called(
+                AgentCall(
+                    name=agent_name,
+                    seconds=perf_counter() - started,
+                    input_tokens=collector.input_tokens,
+                    output_tokens=collector.output_tokens,
+                    llm=collector.llm,
+                    used_tools=list(collector.tools_called),
+                )
+            )

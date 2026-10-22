@@ -14,10 +14,15 @@ inside them, which is what the shape assertions below exist to hold.
 
 from time import perf_counter
 
+
 import pytest
+
 from langchain_core.messages import AIMessage
+
 from langchain_core.outputs import ChatGeneration, ChatResult
+
 from langchain_core.tools import tool
+
 
 from aeko import (
     Aeko,
@@ -30,41 +35,51 @@ from aeko import (
     AekoSession,
     AekoUser,
 )
+
 from aeko.config.exceptions import MalformedAgentOutputError
+
 from aeko.engine.prompts import PLAN_SECTIONS
+
 from tests.conftest import catalog_kwargs, with_extracted_inventory
+
 
 from tests.conftest import FakeChatModel, agent_name_from
 
+
 API_KEY = "fake-api-key"
 
+
 USER_ID = "64b8f0a1c9e1a2b3c4d5e6f1"
+
 SESSION_ID = "64b8f0a1c9e1a2b3c4d5e6f3"
+
 INVENTORY_ID = 502
 
-# What the API correlates one request by, and the only thing it has to supply
-# that the SDK cannot derive for itself.
+
 REQUEST_ID = "req-64b8f0a1c9e1a2b3c4d5e6f9"
+
 
 QUESTION = "O que e hidrogenio verde?"
 
+
 INVENTORY_MD = "| Escopo | tCO2e |\n|---|---|\n| 1 | 1200 |"
+
 CATALOGS = catalog_kwargs()
 
-# A chat turn that ends at the FAQ: two agents, one answer.
+
 CHAT_FLOW = {
     "Roteador": "Duvida conceitual.\nNext agent: FAQ",
     "FAQ": "Hidrogenio verde e produzido por eletrolise.\nNext agent: Nenhum",
 }
 
-# A chat turn the guardrail never approves, so the same agents are called again
-# and again and the turn ends with no answer at all.
+
 REJECTED_FLOW = {
     "Roteador": "Analise tecnica.\nNext agent: Analista de Poluentes",
     "Analista de Poluentes": "CO2 critico.\nNext agent: Orquestrador",
     "Orquestrador": "Panorama consolidado.\nNext agent: Guardrail de Saída",
     "Guardrail de Saída": "Reprovado. Sem fundamentacao.\nNext agent: Nenhum",
 }
+
 
 REVIEWED_FLOW = {
     "Roteador": "Analise tecnica.\nNext agent: Analista de Poluentes",
@@ -73,6 +88,7 @@ REVIEWED_FLOW = {
     "Guardrail de Saída": "Aprovado.\nNext agent: Nenhum",
     "Verificador de Resposta": "Aprovado.\nNext agent: Nenhum",
 }
+
 
 PLAN_FIELDS = {
     "defined_problem": "Os fornos a gas natural concentram a emissao de CO2.",
@@ -105,9 +121,7 @@ INVENTORY_FLOW = {
     ),
 }
 
-# A report whose coordinator never writes the requested sections, which is what
-# `analyze()` raises on — and therefore the only way a report flow ends without
-# a response to carry its event tracking back.
+
 MALFORMED_INVENTORY_FLOW = {
     **INVENTORY_FLOW,
     "Coordenador de Melhoria Contínua": "Resposta em prosa solta.\nNext agent: Nenhum",
@@ -145,10 +159,13 @@ class ToolCallingFakeModel(FakeChatModel):
     """
 
     tool_calling_agents: dict[str, str] = {}
+
     tools_emitted: list[str] = []
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        """Generate."""
         agent = agent_name_from(messages)
+
         wanted = self.tool_calling_agents.get(agent)
 
         if not wanted or agent in self.tools_emitted:
@@ -156,8 +173,6 @@ class ToolCallingFakeModel(FakeChatModel):
 
         self.tools_emitted.append(agent)
 
-        # Reported like any other call: a turn spent calling a tool is still a
-        # turn the run paid tokens for.
         message = AIMessage(
             content="",
             tool_calls=[{"name": wanted, "args": {"query": "h2"}, "id": "call_1"}],
@@ -175,23 +190,27 @@ class ToolCallingFakeModel(FakeChatModel):
 def make_user() -> AekoUser:
     """A user as the API would have read it from the "user" collection."""
 
-    return AekoUser.model_validate({
-        "_id": USER_ID,
-        "id_external_user": 1001,
-        "role": "Gestor ambiental da Ceramica X",
-        "usecase": "Acompanha a substituicao de gases dos fornos.",
-    })
+    return AekoUser.model_validate(
+        {
+            "_id": USER_ID,
+            "id_external_user": 1001,
+            "role": "Gestor ambiental da Ceramica X",
+            "usecase": "Acompanha a substituicao de gases dos fornos.",
+        }
+    )
 
 
 def make_session() -> AekoSession:
     """A conversation as the API would have read it from the "session" collection."""
 
-    return AekoSession.model_validate({
-        "_id": SESSION_ID,
-        "id_user": USER_ID,
-        "name": "Suporte Técnico #12",
-        "messages": [],
-    })
+    return AekoSession.model_validate(
+        {
+            "_id": SESSION_ID,
+            "id_user": USER_ID,
+            "name": "Suporte Técnico #12",
+            "messages": [],
+        }
+    )
 
 
 def by_name(tracking: AekoMetrics) -> dict[str, AekoAgentMetrics]:
@@ -224,8 +243,11 @@ def chat(use_fake_llm):
     """
 
     def _chat(responses: dict[str, str]) -> AekoMessenger:
+        """Chat."""
         use_fake_llm(responses)
+
         Aeko.config(API_KEY)
+
         return AekoMessenger(make_user())
 
     return _chat
@@ -242,8 +264,11 @@ def report(use_fake_llm):
     """
 
     def _report(responses: dict[str, str]) -> AekoInventoryAnalyzer:
+        """Report."""
         use_fake_llm(responses)
+
         Aeko.config(API_KEY)
+
         return AekoInventoryAnalyzer()
 
     return _report
@@ -260,23 +285,26 @@ def tool_calling_chat(monkeypatch):
     """
 
     def _chat(responses: dict[str, str], calling: dict[str, str]) -> AekoMessenger:
+        """Chat."""
         fake = ToolCallingFakeModel(responses=responses, tool_calling_agents=calling)
+
         monkeypatch.setattr(
             "aeko.engine.agents.agents.create_llms", lambda *a, **k: (fake, fake)
         )
+
         from aeko.engine.runtime import RUNTIME
 
         RUNTIME.agents.clear()
+
         Aeko.config(API_KEY)
+
         return AekoMessenger(make_user())
 
     return _chat
 
 
-# --- What comes back -----------------------------------------------------
-
-
 def test_a_chat_response_carries_its_event_tracking(chat):
+    """A chat response carries its event tracking."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -285,58 +313,72 @@ def test_a_chat_response_carries_its_event_tracking(chat):
 
 
 def test_an_analysis_carries_both_the_plan_and_its_event_tracking(report):
+    """An analysis carries both the plan and its event tracking."""
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+        **CATALOGS,
     )
 
     assert isinstance(response, AekoAnalysisResponse)
+
     assert isinstance(response.plan, AekoImprovementPlan)
+
     assert isinstance(response.aeko_metrics, AekoMetrics)
+
     assert response.plan.defined_problem == PLAN_FIELDS["defined_problem"]
 
 
 def test_both_flows_echo_the_request_id_back(chat, report):
+    """Both flows echo the request id back."""
     answered = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
+
     analyzed = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+        **CATALOGS,
     )
 
     assert answered.aeko_metrics.id_request == REQUEST_ID
+
     assert analyzed.aeko_metrics.id_request == REQUEST_ID
 
 
 def test_neither_flow_runs_without_a_request_id(chat, report):
-    # Keyword-only and required: an event tracking nobody can correlate is not
-    # worth persisting, so the SDK refuses to produce one.
+    """Neither flow runs without a request id."""
     with pytest.raises(TypeError):
         chat(CHAT_FLOW).send_message(QUESTION, make_session())
 
     with pytest.raises(TypeError):
-        report(INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID
-        )
+        report(INVENTORY_FLOW).analyze(INVENTORY_MD, id_external_inventory=INVENTORY_ID)
 
 
 def test_the_event_tracking_stays_out_of_the_persisted_documents(chat, report):
+    """The event tracking stays out of the persisted documents."""
     session = make_session()
+
     answered = chat(CHAT_FLOW).send_message(QUESTION, session, id_request=REQUEST_ID)
+
     analyzed = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+        **CATALOGS,
     )
 
-    # One entry of "session.messages" and one "improvement_plan" document,
-    # neither of which the collections have a metrics field for.
     assert "aeko_metrics" not in answered.message.model_dump()
+
     assert "aeko_metrics" not in session.messages[-1].model_dump()
+
     assert "aeko_metrics" not in analyzed.plan.model_dump(by_alias=True)
 
 
-# --- The flow it belongs to ----------------------------------------------
-
-
 def test_a_chat_request_is_tracked_as_conversational(chat):
+    """A chat request is tracked as conversational."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -345,35 +387,36 @@ def test_a_chat_request_is_tracked_as_conversational(chat):
 
 
 def test_a_report_request_is_tracked_as_analytical(report):
+    """A report request is tracked as analytical."""
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+        **CATALOGS,
     )
 
     assert response.aeko_metrics.flow == "analytical"
 
 
-# --- Latency -------------------------------------------------------------
-
-
 def test_the_latency_is_the_whole_request_in_whole_milliseconds(chat):
+    """The latency is the whole request in whole milliseconds."""
     messenger = chat(CHAT_FLOW)
 
     started = perf_counter()
+
     response = messenger.send_message(QUESTION, make_session(), id_request=REQUEST_ID)
+
     elapsed_millis = (perf_counter() - started) * 1000
 
     latency = response.aeko_metrics.latency
 
-    # Whole milliseconds, so a request measured at 23.8ms reports 24 — a hair
-    # over what the clock around it saw, and the only slack this allows.
     assert isinstance(latency, int)
+
     assert 0 <= latency <= elapsed_millis + 1
 
 
-# --- The agents a request went through -----------------------------------
-
-
 def test_the_agents_are_listed_in_call_order(chat):
+    """The agents are listed in call order."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -384,6 +427,7 @@ def test_the_agents_are_listed_in_call_order(chat):
 
 
 def test_an_agent_called_more_than_once_is_listed_once_per_call(chat):
+    """An agent called more than once is listed once per call."""
     with pytest.raises(MalformedAgentOutputError) as raised:
         chat(REJECTED_FLOW).send_message(
             "Compare os escopos.", make_session(), id_request=REQUEST_ID
@@ -391,25 +435,29 @@ def test_an_agent_called_more_than_once_is_listed_once_per_call(chat):
 
     called = [agent.name for agent in raised.value.aeko_metrics.used_agents]
 
-    # The guardrail's retry loop runs the same agents again and again, and the
-    # event tracking shows the loop rather than collapsing it into unique names
-    # — a turn that cost four routings is not a turn that cost one.
     assert called.count("Roteador") > 1
+
     assert called.count("Guardrail de Saída") > 1
 
 
 def test_a_report_lists_the_analysts_it_entered_through(report):
+    """A report lists the analysts it entered through."""
     response = report(INVENTORY_FLOW).analyze(
-        INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+        INVENTORY_MD,
+        id_external_inventory=INVENTORY_ID,
+        id_request=REQUEST_ID,
+        **CATALOGS,
     )
 
     called = [agent.name for agent in response.aeko_metrics.used_agents]
 
     assert called[0] == "Análista de inventários"
+
     assert "Roteador" not in called
 
 
 def test_each_agent_carries_the_tokens_its_own_call_consumed(chat):
+    """Each agent carries the tokens its own call consumed."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -418,10 +466,12 @@ def test_each_agent_carries_the_tokens_its_own_call_consumed(chat):
 
     for agent in response.aeko_metrics.used_agents:
         assert agent.input_tokens == llm.usage_input_tokens
+
         assert agent.output_tokens == llm.usage_output_tokens
 
 
 def test_each_agent_carries_the_model_that_served_it(chat):
+    """Each agent carries the model that served it."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -430,25 +480,24 @@ def test_each_agent_carries_the_model_that_served_it(chat):
 
 
 def test_what_a_turn_cost_is_reported_here_and_nowhere_else(chat):
+    """What a turn cost is reported here and nowhere else."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
 
     agents = response.aeko_metrics.used_agents
 
-    # The turn is what the user said and what came back, nothing more: a
-    # rolled-up copy of these numbers on the persisted entry would be a second
-    # record of one fact, free to drift from this one.
     assert set(response.message.model_dump()) == {"input", "output", "submitted_at"}
+
     assert sum(agent.input_tokens for agent in agents) > 0
+
     assert sum(agent.output_tokens for agent in agents) > 0
 
 
-# --- The tools an agent called -------------------------------------------
-
-
 def test_an_agent_lists_the_tools_it_actually_called(tool_calling_chat):
+    """An agent lists the tools it actually called."""
     AekoMessenger.set_tools({"FAQ": [consulta_precos]})
+
     messenger = tool_calling_chat(CHAT_FLOW, {"FAQ": "consulta_precos"})
 
     response = messenger.send_message(QUESTION, make_session(), id_request=REQUEST_ID)
@@ -457,9 +506,9 @@ def test_an_agent_lists_the_tools_it_actually_called(tool_calling_chat):
 
 
 def test_a_tool_an_agent_never_called_is_not_listed(tool_calling_chat):
-    # Both are registered and both are advertised in the FAQ's prompt; only the
-    # one the agent actually reached for is a tool the run used.
+    """A tool an agent never called is not listed."""
     AekoMessenger.set_tools({"FAQ": [consulta_precos, consulta_fatores]})
+
     messenger = tool_calling_chat(CHAT_FLOW, {"FAQ": "consulta_precos"})
 
     response = messenger.send_message(QUESTION, make_session(), id_request=REQUEST_ID)
@@ -468,7 +517,9 @@ def test_a_tool_an_agent_never_called_is_not_listed(tool_calling_chat):
 
 
 def test_an_agent_that_called_no_tool_lists_none(tool_calling_chat):
+    """An agent that called no tool lists none."""
     AekoMessenger.set_tools({"FAQ": [consulta_precos]})
+
     messenger = tool_calling_chat(CHAT_FLOW, {"FAQ": "consulta_precos"})
 
     response = messenger.send_message(QUESTION, make_session(), id_request=REQUEST_ID)
@@ -477,6 +528,7 @@ def test_an_agent_that_called_no_tool_lists_none(tool_calling_chat):
 
 
 def test_a_run_with_no_tools_registered_lists_none(chat):
+    """A run with no tools registered lists none."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -484,10 +536,8 @@ def test_a_run_with_no_tools_registered_lists_none(chat):
     assert all(agent.used_tools == [] for agent in response.aeko_metrics.used_agents)
 
 
-# --- How a request ended -------------------------------------------------
-
-
 def test_a_request_that_went_well_describes_no_error(chat):
+    """A request that went well describes no error."""
     response = chat(CHAT_FLOW).send_message(
         QUESTION, make_session(), id_request=REQUEST_ID
     )
@@ -496,8 +546,7 @@ def test_a_request_that_went_well_describes_no_error(chat):
 
 
 def test_a_turn_no_reviewer_approved_carries_its_tracking_on_the_exception(chat):
-    # It raises and delivers nothing, so the tracking travels on the exception
-    # for the same reason a failed analysis does: there is no return value left.
+    """A turn no reviewer approved carries its tracking on the exception."""
     with pytest.raises(MalformedAgentOutputError) as raised:
         chat(REJECTED_FLOW).send_message(
             "Compare os escopos.", make_session(), id_request=REQUEST_ID
@@ -506,14 +555,18 @@ def test_a_turn_no_reviewer_approved_carries_its_tracking_on_the_exception(chat)
     tracking = raised.value.aeko_metrics
 
     assert isinstance(tracking, AekoMetrics)
+
     assert tracking.id_request == REQUEST_ID
+
     assert tracking.flow == "conversational"
+
     assert "no answer approved by the output guardrail" in (
         tracking.error_description or ""
     )
 
 
 def test_the_response_checker_is_accounted_for_like_any_other_agent(chat):
+    """The response checker is accounted for like any other agent."""
     response = chat(REVIEWED_FLOW).send_message(
         "Compare os escopos.", make_session(), id_request=REQUEST_ID
     )
@@ -521,32 +574,43 @@ def test_the_response_checker_is_accounted_for_like_any_other_agent(chat):
     checker = by_name(response.aeko_metrics)["Verificador de Resposta"]
 
     assert checker.input_tokens > 0
+
     assert checker.output_tokens > 0
 
 
 def test_a_failed_analysis_carries_its_event_tracking_on_the_exception(report):
+    """A failed analysis carries its event tracking on the exception."""
     with pytest.raises(MalformedAgentOutputError) as raised:
         report(MALFORMED_INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
     tracking = raised.value.aeko_metrics
 
-    # There is no return value to hang it on, and a request that failed is the
-    # one the API most needs to have persisted.
     assert isinstance(tracking, AekoMetrics)
+
     assert tracking.id_request == REQUEST_ID
+
     assert "MalformedAgentOutputError" in (tracking.error_description or "")
 
 
 def test_the_event_tracking_of_a_failed_request_still_lists_what_it_ran(report):
+    """The event tracking of a failed request still lists what it ran."""
     with pytest.raises(MalformedAgentOutputError) as raised:
         report(MALFORMED_INVENTORY_FLOW).analyze(
-            INVENTORY_MD, id_external_inventory=INVENTORY_ID, id_request=REQUEST_ID, **CATALOGS
+            INVENTORY_MD,
+            id_external_inventory=INVENTORY_ID,
+            id_request=REQUEST_ID,
+            **CATALOGS,
         )
 
     tracking = raised.value.aeko_metrics
 
     assert tracking.flow == "analytical"
+
     assert tracking.latency >= 0
+
     assert [agent.name for agent in tracking.used_agents]

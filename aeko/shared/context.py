@@ -1,12 +1,16 @@
+"""Execution-context binding for the request currently being processed."""
+
 from __future__ import annotations
 
+
 from contextvars import ContextVar, Token
+
 from enum import Enum
+
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # pragma: no cover - import kept out of runtime to avoid a
-    # cycle: `logger` is built on top of this module, so this module must never
-    # import it at load time. The same pattern the engine's runtime uses.
+
+if TYPE_CHECKING:
     from aeko.shared.logger import Processing
 
 
@@ -21,16 +25,10 @@ class Flow(Enum):
     """
 
     CONVERSATIONAL = "Conversational"
+
     REPORT = "Report"
 
 
-# The processing the current execution context belongs to, so that code called
-# deep inside a run — the graph invoking an agent, above all — can report into
-# it without every layer in between having to pass it down.
-#
-# A ContextVar rather than a module global because the SDK is served from a
-# stateless API: two requests handled by the same worker, including two
-# coroutines of one thread, must never write into each other's log.
 _CURRENT_RUN: ContextVar["Processing | None"] = ContextVar("aeko_run", default=None)
 
 

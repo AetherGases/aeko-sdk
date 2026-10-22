@@ -6,5 +6,4 @@ MESSENGER_LOG_MODULE = "messenger"
 INVENTORY_LOG_MODULE = "inventory"
 SESSION_HISTORY_USAGE = 10
 MEMORIES_LABEL = "Memórias do usuário:"
-INVENTORY_ENTRY_POINT = "Análista de inventários"
-
+INVENTORY_SCHEMA_MAX_RETRIES = 2

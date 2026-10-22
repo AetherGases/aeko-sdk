@@ -6,4 +6,4 @@ RESPONSE_CHECKER = "Verificador de Resposta"
 REPORT_FLOW_ANALYSTS = ("Analista de Poluentes", "Analista de Gases Verdes")
 IMPROVEMENT_COORDINATOR = "Coordenador de Melhoria Contínua"
 PLAN_FORMAT_MAX_RETRIES = 4
-
+INVENTORY_ENTRY_POINT = "Análista de inventários"

@@ -1,30 +1,40 @@
+"""Build LangChain prompts from PromptSpec values."""
+
 from dataclasses import dataclass, field
+
 from datetime import datetime, timezone
+
 from typing import Dict
+
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
     FewShotChatMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
+
 from langchain_core.prompts.chat import MessagesPlaceholder
 
-from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
 
-DEFAULT_INITIAL_CONTEXT = (
-    "Você é um agente do ecossistema Aether: uma empresa que busca auxiliar industrias na transição e monintoramento da substituição de gases poluentes para gases verdes."
-)
+from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
 
 
 @dataclass
 class PromptSpec:
     agent: str = ""
+
     scope: str = ""
+
     persona: str = ""
+
     tasks: list[str] = field(default_factory=list)
+
     tools: list[str] = field(default_factory=list)
+
     next_agents: list[str] = field(default_factory=list)
+
     shots: list[Dict[str, str]] = field(default_factory=list)
+
     initial_context: str = DEFAULT_INITIAL_CONTEXT
 
 
@@ -36,7 +46,11 @@ def _current_datetime() -> str:
         str: The current date and time, e.g. "Monday, 19 de August de 2026 — 14:30:00".
     """
 
-    return datetime.now(timezone.utc).astimezone().strftime("%A, %d de %B de %Y — %H:%M:%S %Z")
+    return (
+        datetime.now(timezone.utc)
+        .astimezone()
+        .strftime("%A, %d de %B de %Y — %H:%M:%S %Z")
+    )
 
 
 def _render_instructions(prompt: PromptSpec) -> str:
@@ -54,22 +68,37 @@ def _render_instructions(prompt: PromptSpec) -> str:
     sections = [
         ("# Contexto Inicial", prompt.initial_context),
         ("# Escopo", prompt.scope),
-        ("# Persona", "Voce é o agente: " + prompt.agent + " - Você deve atuar com base em: " + prompt.persona),
+        (
+            "# Persona",
+            "Voce é o agente: "
+            + prompt.agent
+            + " - Você deve atuar com base em: "
+            + prompt.persona,
+        ),
         ("# Tarefas", "\n".join(f"- {task}" for task in prompt.tasks)),
         ("# Ferramentas Disponiveis", "\n".join(f"- {tool}" for tool in prompt.tools)),
-        ("# Agentes disponiveis", "\n".join(f"- {agent}" for agent in prompt.next_agents)),
-        ("# Formato da Resposta", (
-            "Ao final da sua resposta, adicione uma nova linha no formato exato "
-            "\"Next agent: <Nome>\", usando exatamente um dos nomes listados em "
-            "\"Agentes disponiveis\". Se nao houver um proximo agente (fluxo "
-            "encerrado), utilize \"Next agent: Nenhum\". Essa linha deve ser a "
-            "última da resposta: não escreva nada depois dela."
-        )),
+        (
+            "# Agentes disponiveis",
+            "\n".join(f"- {agent}" for agent in prompt.next_agents),
+        ),
+        (
+            "# Formato da Resposta",
+            (
+                "Ao final da sua resposta, adicione uma nova linha no formato exato "
+                '"Next agent: <Nome>", usando exatamente um dos nomes listados em '
+                '"Agentes disponiveis". Se nao houver um proximo agente (fluxo '
+                'encerrado), utilize "Next agent: Nenhum". Essa linha deve ser a '
+                "última da resposta: não escreva nada depois dela."
+            ),
+        ),
     ]
 
     rendered_sections = []
+
     for title, content in sections:
-        rendered_sections.append(f"{title}\n{content if content else '(No content for this section)'}".rstrip())
+        rendered_sections.append(
+            f"{title}\n{content if content else '(No content for this section)'}".rstrip()
+        )
 
     return "\n\n".join(rendered_sections)
 
@@ -100,8 +129,10 @@ def build_prompt(prompt: PromptSpec | None = None, **kwargs) -> ChatPromptTempla
 
     if prompt is None:
         prompt = PromptSpec(**kwargs)
+
     elif kwargs:
         raise ValueError("Use either a prompt object or keyword arguments, not both.")
+
     elif not isinstance(prompt, PromptSpec):
         raise TypeError("prompt must be a PromptSpec instance.")
 
@@ -119,6 +150,7 @@ def build_prompt(prompt: PromptSpec | None = None, **kwargs) -> ChatPromptTempla
         example_prompt = ChatPromptTemplate.from_messages(
             [("human", "{pergunta}"), ("ai", "{resposta}")]
         )
+
         messages.append(
             FewShotChatMessagePromptTemplate(
                 example_prompt=example_prompt,

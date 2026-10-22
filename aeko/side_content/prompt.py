@@ -1,4 +1,7 @@
+"""Prompt spec for the conversation summarizer."""
+
 from aeko.engine.prompts.builder import PromptSpec
+
 
 SUMMARIZER_SPEC = PromptSpec(
     agent="Sumarizador",
@@ -24,13 +27,8 @@ SUMMARIZER_SPEC = PromptSpec(
     next_agents=[],
     shots=[
         {
-            "pergunta": (
-                "Transcrição da conversa:\n"
-                "Não houve mensagens nesta janela."
-            ),
-            "resposta": (
-                "Não houve mensagens na janela de conversa analisada."
-            ),
+            "pergunta": ("Transcrição da conversa:\nNão houve mensagens nesta janela."),
+            "resposta": ("Não houve mensagens na janela de conversa analisada."),
         },
         {
             "pergunta": (

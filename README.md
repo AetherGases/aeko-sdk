@@ -99,6 +99,7 @@ removed name to its replacement.
 - [Migrating from 1.x](#migrating-from-1x)
 - [API reference](#api-reference)
 - [Development](#development)
+- [Project structure](PROJECT_STRUCTURE.md)
 - [Resumo em português](#resumo-em-português)
 - [License](#license)
 
@@ -231,17 +232,20 @@ Aeko.config("YOUR_GEMINI_API_KEY")
 # 2. Chat. The documents come straight out of your database, on every request.
 user = AekoUser.model_validate(db.user.find_one({"_id": user_id}))
 session = AekoSession.model_validate(db.session.find_one({"_id": session_id}))
-memories = [AekoUserMemory.model_validate(document)
-            for document in db.user_memory.find({"id_user": user_id})]
+memories = [
+    AekoUserMemory.model_validate(document)
+    for document in db.user_memory.find({"id_user": user_id})
+]
 
 messenger = AekoMessenger(user, memories)
 reply = messenger.send_message(
-    "What is the difference between scope 1 and scope 2?", session,
-    id_request="req-8a31",   # yours, so you can correlate what the run cost
+    "What is the difference between scope 1 and scope 2?",
+    session,
+    id_request="req-8a31",  # yours, so you can correlate what the run cost
 )
 print(reply.message.output)  # the answer
-print(reply.agents_called)   # e.g. ['FAQ']
-print(reply.approved)        # guardrail verdict
+print(reply.agents_called)  # e.g. ['FAQ']
+print(reply.approved)  # guardrail verdict
 print(reply.aeko_metrics.latency)  # e.g. 2841 (ms)
 
 # `reply.message` is one entry of `session.messages`, ready to append.
@@ -251,10 +255,14 @@ db.session.update_one(
 
 # 3. Analyze an inventory.
 analyzer = AekoInventoryAnalyzer()
-analyzer.set_context("Last report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
+analyzer.set_context(
+    "Last report: 12,400 tCO2e, scope 1 dominated by the boiler fleet."
+)
 
 analysis = analyzer.analyze(
-    inventory_markdown, id_external_inventory=502, id_request="req-8a32",
+    inventory_markdown,
+    id_external_inventory=502,
+    id_request="req-8a32",
     gases=[{"id": 1, "name": "CO2"}],
     scopes=[{"id": 1, "name": "Scope 1"}],
     categories=[{"id": 1, "name": "Stationary combustion", "classification": None}],
@@ -293,13 +301,13 @@ from aeko import Aeko
 
 Aeko.config(
     api_key=settings.GEMINI_API_KEY,
-    fast_model="gemini-3.1-flash-lite",     # router, FAQ, orchestrator, both reviewers
-    slow_model="gemini-3.5-flash",          # the four specialist analysts
-    max_tokens=1024,                        # output cap for chat turns
-    report_max_tokens=8192,                 # output cap for the inventory report
-    temperature=1.0,                        # sampling temperature
-    top_p=0.95,                              # nucleus sampling probability
-    top_k=64,                                # candidate sampling limit
+    fast_model="gemini-3.1-flash-lite",  # router, FAQ, orchestrator, both reviewers
+    slow_model="gemini-3.5-flash",  # the four specialist analysts
+    max_tokens=1024,  # output cap for chat turns
+    report_max_tokens=8192,  # output cap for the inventory report
+    temperature=1.0,  # sampling temperature
+    top_p=0.95,  # nucleus sampling probability
+    top_k=64,  # candidate sampling limit
 )
 ```
 
@@ -318,21 +326,25 @@ over your own documents. Aeko binds them to the agents you choose.
 from langchain_core.tools import tool
 from aeko import AekoMessenger, AekoTool
 
+
 @tool
 def consulta_precos(equipamento: str) -> str:
     """Return the average market price for a piece of equipment."""
     return price_service.lookup(equipamento)
 
-AekoMessenger.set_tools({
-    "Coordenador de Melhoria Contínua": [
-        AekoTool(
-            tool=consulta_precos,
-            description="Use to price the equipment you recommend, in BRL.",
-        ),
-    ],
-    # A bare LangChain tool works too — its own docstring becomes the description.
-    "FAQ": [buscar_norma],
-})
+
+AekoMessenger.set_tools(
+    {
+        "Coordenador de Melhoria Contínua": [
+            AekoTool(
+                tool=consulta_precos,
+                description="Use to price the equipment you recommend, in BRL.",
+            ),
+        ],
+        # A bare LangChain tool works too — its own docstring becomes the description.
+        "FAQ": [buscar_norma],
+    }
+)
 ```
 
 Each tool is used **twice, from a single declaration**: its description is rendered into
@@ -359,8 +371,11 @@ from aeko import AekoMessage, AekoMessenger, AekoSession, AekoUser, AekoUserMemo
 
 # Built once per user — it holds nothing about any conversation.
 messenger = AekoMessenger(
-    AekoUser(id_external_user=1001, role="ESG analyst",
-             usecase="Tracks the boiler fleet's gas substitution."),
+    AekoUser(
+        id_external_user=1001,
+        role="ESG analyst",
+        usecase="Tracks the boiler fleet's gas substitution.",
+    ),
     [AekoUserMemory(field="preferred_language", description="Answers in Portuguese")],
 )
 
@@ -373,7 +388,8 @@ session = AekoSession(
 )
 
 response = messenger.send_message(
-    "Our scope 1 jumped 12% this quarter. Where do I look?", session,
+    "Our scope 1 jumped 12% this quarter. Where do I look?",
+    session,
     id_request="req-8a31",
 )
 ```
@@ -443,7 +459,7 @@ them** is rendered into the same business context the user's role and usecase go
 every agent of the run reads them:
 
 ```python
-messenger = AekoMessenger(user, memories)   # list[AekoUserMemory]
+messenger = AekoMessenger(user, memories)  # list[AekoUserMemory]
 ```
 
 Each memory becomes one `"- <field>: <description>"` line (`AekoUserMemory.to_prompt_line()`)
@@ -464,11 +480,17 @@ from aeko import AekoInventoryAnalyzer
 analyzer = AekoInventoryAnalyzer()
 
 # Optional: a company's first report legitimately has no previous one.
-analyzer.set_context("2025 report: 12,400 tCO2e, scope 1 dominated by the boiler fleet.")
+analyzer.set_context(
+    "2025 report: 12,400 tCO2e, scope 1 dominated by the boiler fleet."
+)
 
 analysis = analyzer.analyze(
-    inventory_markdown, id_external_inventory=502, id_request="req-8a32",
-    gases=gases, scopes=scopes, categories=categories,
+    inventory_markdown,
+    id_external_inventory=502,
+    id_request="req-8a32",
+    gases=gases,
+    scopes=scopes,
+    categories=categories,
 )
 plan = analysis.plan
 inventory = analysis.inventory
@@ -542,7 +564,9 @@ given a say in `_id` or `updated_at` — only the three content fields are read 
 deterministic step that does not re-run the analysts:
 
 1. **Salvage** — locate the ```inventory fence in the coordinator's answer, parse the JSON,
-   and tolerate common slips (trailing commas, minor fence damage).
+   and tolerate common slips (trailing commas, Python `None`/`True`/`False`). If that
+   fence is missing, a single JSON object after `## Raciocínio` is accepted the same way.
+   Recovered JSON is stripped from the plan text so it cannot leak into `reasoning`.
 2. **Canonicalize** — normalize types and nulls and derive `is_upstream` from each line's
    category classification in the catalogs you passed in.
 
@@ -620,10 +644,16 @@ carry the metrics — so they are attached to the exception instead:
 
 ```python
 try:
-    analysis = analyzer.analyze(inventory, id_external_inventory=502, id_request=rid,
-                                gases=gases, scopes=scopes, categories=categories)
+    analysis = analyzer.analyze(
+        inventory,
+        id_external_inventory=502,
+        id_request=rid,
+        gases=gases,
+        scopes=scopes,
+        categories=categories,
+    )
 except AekoError as exc:
-    if exc.aeko_metrics:                      # None for errors raised outside a request
+    if exc.aeko_metrics:  # None for errors raised outside a request
         db.aeko_metrics.insert_one(exc.aeko_metrics.model_dump())
     raise
 ```
@@ -669,12 +699,17 @@ from .tools import buscar_norma, consulta_precos
 async def lifespan(app: FastAPI):
     # Process-wide setup: exactly once, before the first request.
     Aeko.config(settings.GEMINI_API_KEY, report_max_tokens=12288)
-    AekoMessenger.set_tools({
-        "FAQ": [buscar_norma],
-        "Coordenador de Melhoria Contínua": [
-            AekoTool(tool=consulta_precos, description="Price the equipment you recommend."),
-        ],
-    })
+    AekoMessenger.set_tools(
+        {
+            "FAQ": [buscar_norma],
+            "Coordenador de Melhoria Contínua": [
+                AekoTool(
+                    tool=consulta_precos,
+                    description="Price the equipment you recommend.",
+                ),
+            ],
+        }
+    )
     yield
 
 
@@ -776,7 +811,9 @@ def inventory(body: InventoryRequest):
     db.aeko_metrics.insert_one(analysis.aeko_metrics.model_dump())
 
     # `exclude={"id"}`: the plan is new, so let MongoDB generate its `_id`.
-    db.improvement_plan.insert_one(analysis.plan.model_dump(by_alias=True, exclude={"id"}))
+    db.improvement_plan.insert_one(
+        analysis.plan.model_dump(by_alias=True, exclude={"id"})
+    )
 
     return analysis.plan.model_dump(exclude={"id"})
 ```
@@ -841,9 +878,7 @@ plan = analyzer.analyze(markdown, id_external_inventory=502)
 
 # 3.1
 reply = messenger.send_message(text, session, id_request=request_id)
-plan = analyzer.analyze(
-    markdown, id_external_inventory=502, id_request=request_id
-).plan
+plan = analyzer.analyze(markdown, id_external_inventory=502, id_request=request_id).plan
 ```
 
 | What | Change |
@@ -891,9 +926,9 @@ result = messenger.send_message("Our scope 1 jumped 12%.")
 answer = result.answer
 
 # 2.0
-messenger = AekoMessenger(user, memories)                    # who is asking
+messenger = AekoMessenger(user, memories)  # who is asking
 response = messenger.send_message("Our scope 1 jumped 12%.", session)
-answer = response.message.output                             # may be "" — check it
+answer = response.message.output  # may be "" — check it
 ```
 
 Four consequences worth planning for:
@@ -1023,8 +1058,15 @@ pip install -e .
 pytest
 ```
 
-The test suite runs against a scripted fake chat model and never calls Gemini, so no API
-key is needed to run it.
+Python **3.11** only. The test suite runs against a scripted fake chat model and never
+calls Gemini, so no API key is needed to run it. CI (`.github/workflows/ci.yml`) is that
+same `pytest` on 3.11.
+
+How the package is layered, what is public, and the practices a change must follow —
+docstrings on every function, no `#` comments, no import cycles from engine into
+config, inventory salvage before schema fill, the `Next agent:` handoff — are in
+**[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)**. `tests/test_code_quality.py` enforces
+the docstring / no-comment rule on `aeko/` and `tests/`.
 
 `requirements.txt` pins the exact versions the suite is green against; `pyproject.toml`
 declares the same dependencies as ranges, so installing the SDK next to other LangChain
@@ -1049,28 +1091,43 @@ pip install aeko
 ```
 
 ```python
-from aeko import (Aeko, AekoInventoryAnalyzer, AekoMessenger, AekoSession, AekoUser,
-                  AekoUserMemory)
+from aeko import (
+    Aeko,
+    AekoInventoryAnalyzer,
+    AekoMessenger,
+    AekoSession,
+    AekoUser,
+    AekoUserMemory,
+)
 
-Aeko.config("SUA_CHAVE_GEMINI")          # obrigatório: o SDK não lê variáveis de ambiente
+Aeko.config("SUA_CHAVE_GEMINI")  # obrigatório: o SDK não lê variáveis de ambiente
 
 usuario = AekoUser.model_validate(db.user.find_one({"_id": id_usuario}))
 sessao = AekoSession.model_validate(db.session.find_one({"_id": id_sessao}))
-memorias = [AekoUserMemory.model_validate(documento)
-            for documento in db.user_memory.find({"id_user": id_usuario})]
+memorias = [
+    AekoUserMemory.model_validate(documento)
+    for documento in db.user_memory.find({"id_user": id_usuario})
+]
 
 messenger = AekoMessenger(usuario, memorias)
-resposta = messenger.send_message("Como reduzo o escopo 1 da nossa caldeira?", sessao,
-                                  id_request="req-8a31")
+resposta = messenger.send_message(
+    "Como reduzo o escopo 1 da nossa caldeira?", sessao, id_request="req-8a31"
+)
 print(resposta.message.output)
-db.session.update_one({"_id": id_sessao},
-                      {"$push": {"messages": resposta.message.model_dump()}})
+db.session.update_one(
+    {"_id": id_sessao}, {"$push": {"messages": resposta.message.model_dump()}}
+)
 db.aeko_metrics.insert_one(resposta.aeko_metrics.model_dump())
 
 analisador = AekoInventoryAnalyzer()
-analise = analisador.analyze(inventario_em_markdown, id_external_inventory=502,
-                             id_request="req-8a32", gases=gases, scopes=scopes,
-                             categories=categories)
+analise = analisador.analyze(
+    inventario_em_markdown,
+    id_external_inventory=502,
+    id_request="req-8a32",
+    gases=gases,
+    scopes=scopes,
+    categories=categories,
+)
 db.improvement_plan.insert_one(analise.plan.model_dump(by_alias=True, exclude={"id"}))
 db.aeko_metrics.insert_one(analise.aeko_metrics.model_dump())
 ```
@@ -1130,7 +1187,11 @@ nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
    **no grafo**. O inventário estruturado passa por salvage/canonicalização determinística
    após o grafo; só JSON irrecuperável dispara até duas chamadas extras do Coordenador
    (só inventário, plano congelado). Falhas semânticas de catálogo não reconvocam o modelo.
-   O chat não usa fence de inventário nem schema fill.
+   O chat não usa fence de inventário nem schema fill. JSON recuperado (fence ou objeto
+   após Raciocínio) é removido do texto do plano para não vazar em `reasoning`.
+
+Quem for **alterar** o SDK deve seguir [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
+(camadas, API pública, docstrings, testes sem Gemini, protocolo `Next agent:`).
 
 Os nomes dos agentes (`Roteador`, `FAQ`, `Orquestrador`, `Guardrail de Saída`,
 `Verificador de Resposta`, `Análista de inventários`, `Analista de Poluentes`,
