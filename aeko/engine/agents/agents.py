@@ -9,7 +9,13 @@ from typing import Any
 
 from langchain.agents import create_agent
 
+from langchain.agents.middleware import ToolErrorMiddleware
+
 from langchain_core.language_models import BaseChatModel
+
+from langchain_core.tools import StructuredTool
+
+from langchain_core.tools.simple import Tool as SimpleTool
 
 
 from aeko.engine.agents.constants import FAST_AGENTS
@@ -40,9 +46,74 @@ def _to_prompt_line(tool: Any) -> str:
     )
 
 
+def _as_structured_tool(tool: Any) -> Any:
+    """
+    Promote a single-input Tool whose schema has the wrong arity.
+
+    LangChain's `Tool` still enforces one argument at invoke time even when an
+    `args_schema` with several fields is attached. The consuming API registers
+    tools that way (`update_user_profile` with `role` and `usecase`), so a
+    normal model call raises `ToolException` and used to abort the request.
+    `StructuredTool` is the same function with the schema actually honoured.
+
+    Args:
+        tool: A LangChain tool, already unwrapped from `AekoTool`.
+
+    Returns:
+        Any: A `StructuredTool` when the original was a simple `Tool` with
+            zero or 2+ arguments, otherwise the original tool.
+    """
+
+    if not isinstance(tool, SimpleTool):
+        return tool
+
+    arg_keys = list(getattr(tool, "args", {}) or {})
+
+    if len(arg_keys) == 1:
+        return tool
+
+    return StructuredTool.from_function(
+        func=tool.func,
+        coroutine=tool.coroutine,
+        name=tool.name,
+        description=tool.description,
+        args_schema=tool.args_schema,
+        return_direct=tool.return_direct,
+    )
+
+
+def _on_tool_error(exc: Exception, request: Any) -> str:
+    """
+    Turn a tool-execution exception into text the model can recover from.
+
+    Without this, LangGraph's default handler only swallows
+    `ToolInvocationError` and re-raises everything else — including a tool
+    that raised `ValueError` — which escaped `send_message` as a 500.
+
+    Args:
+        exc: The exception raised while running the tool.
+        request: The tool-call request LangChain hands the middleware.
+
+    Returns:
+        str: An observation naming the tool and the exception type.
+    """
+
+    tool_call = getattr(request, "tool_call", None) or {}
+
+    name = tool_call.get("name") if isinstance(tool_call, dict) else None
+
+    detail = str(exc).strip().splitlines()[0][:200]
+
+    return f"Tool `{name or 'tool'}` failed with {type(exc).__name__}: {detail}"
+
+
 def _to_lc_tool(tool: Any) -> Any:
     """
     Unwrap the LangChain tool an `AekoTool` carries.
+
+    A simple `Tool` whose schema is not a single argument is promoted to a
+    `StructuredTool` here, so the bound object can actually accept the dict
+    the model sends.
 
     Args:
         tool: An `AekoTool` wrapper, or an already-bare LangChain tool.
@@ -51,7 +122,7 @@ def _to_lc_tool(tool: Any) -> Any:
         Any: The tool object to bind to the agent executor.
     """
 
-    return getattr(tool, "tool", tool)
+    return _as_structured_tool(getattr(tool, "tool", tool))
 
 
 class _AgentCompatibilityWrapper:
@@ -107,7 +178,12 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Any:
 
     system_message = prompt.invoke({"messages": []}).messages[0]
 
-    graph = create_agent(llm, tools=lc_tools, system_prompt=system_message)
+    graph = create_agent(
+        llm,
+        tools=lc_tools,
+        system_prompt=system_message,
+        middleware=[ToolErrorMiddleware(_on_tool_error)],
+    )
 
     return _AgentCompatibilityWrapper(graph, prompt, llm, lc_tools)
 
