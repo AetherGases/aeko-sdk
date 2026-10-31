@@ -22,6 +22,8 @@ from aeko.engine.agents.constants import FAST_AGENTS
 
 from aeko.engine.agents.llms import create_llms
 
+from aeko.engine.agents.writes import stage_writes
+
 from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
 
 from aeko.engine.runtime import RUNTIME
@@ -122,7 +124,7 @@ def _to_lc_tool(tool: Any) -> Any:
         Any: The tool object to bind to the agent executor.
     """
 
-    return _as_structured_tool(getattr(tool, "tool", tool))
+    return stage_writes(_as_structured_tool(getattr(tool, "tool", tool)))
 
 
 class _AgentCompatibilityWrapper:

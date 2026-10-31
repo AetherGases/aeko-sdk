@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from aeko.engine.graph import nodes
 
 from aeko.engine.graph.constants import (
+    CONSOLIDATOR,
     GUARD_RAIL_MAX_RETRIES,
     IMPROVEMENT_COORDINATOR,
     INVENTORY_ENTRY_POINT,
@@ -175,10 +176,10 @@ def _route_from_response_check(state: AetherGraphState) -> str:
             "Roteador".
     """
 
-    if (
-        state["response_check_approved"]
-        or state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES
-    ):
+    if state["response_check_approved"]:
+        return CONSOLIDATOR
+
+    if state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES:
         return END
 
     return "Roteador"
@@ -203,6 +204,8 @@ def build_graph() -> StateGraph:
     graph.add_node("Guardrail de Saída", nodes.guardrail_node)
 
     graph.add_node(RESPONSE_CHECKER, nodes.verificador_resposta_node)
+
+    graph.add_node(CONSOLIDATOR, nodes.consolidador_node)
 
     graph.add_node("Análista de inventários", nodes.analista_inventarios_node)
 
@@ -291,9 +294,12 @@ def build_graph() -> StateGraph:
         _route_from_response_check,
         {
             "Roteador": "Roteador",
+            CONSOLIDATOR: CONSOLIDATOR,
             END: END,
         },
     )
+
+    graph.add_edge(CONSOLIDATOR, END)
 
     return graph
 

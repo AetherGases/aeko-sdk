@@ -20,7 +20,7 @@ from aeko.engine.prompts import INVENTORY_PAYLOAD_INSTRUCTIONS
 
 from aeko.engine.runtime import RUNTIME, text_of
 
-from aeko.shared import agent_call
+from aeko.shared import agent_call, current_run
 
 from aeko.shared.text import next_agent_name
 
@@ -581,6 +581,31 @@ def _verificador_resposta_node(
     return update
 
 
+def _consolidador_node(state: AetherGraphState) -> dict:
+    """
+    Commit the writes the agents staged during an approved turn.
+
+    Reached only on the endings that deliver a result, so a turn that gave up
+    never changes anything. Every intent the run collected is invoked in order,
+    retried attempts included: nothing is deduplicated.
+
+    Args:
+        state: The current graph state (unused, kept for the node signature).
+
+    Returns:
+        dict: An empty state update — the answer is already in "messages".
+    """
+
+    run = current_run()
+
+    for intent in run.pending_writes if run else []:
+        intent.tool.invoke(intent.args)
+
+        intent.status = "committed"
+
+    return {}
+
+
 def _is_report_flow(config: RunnableConfig | None) -> bool:
     """
     Say whether a run entered through the report flow's entry point.
@@ -682,6 +707,8 @@ orquestrador_node = _orquestrador_node
 guardrail_node = _guardrail_node
 
 verificador_resposta_node = _verificador_resposta_node
+
+consolidador_node = _consolidador_node
 
 
 analista_inventarios_node = _specialist_node_factory("Análista de inventários")

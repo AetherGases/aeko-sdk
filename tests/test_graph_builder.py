@@ -245,11 +245,11 @@ def test_both_reviewers_get_two_rejections_before_the_run_gives_up():
     assert builder.RESPONSE_CHECK_MAX_RETRIES == 2
 
 
-def test_route_from_response_check_approved_ends_the_graph():
-    """Route from response check approved ends the graph."""
+def test_route_from_response_check_approved_goes_to_the_consolidator():
+    """Route from response check approved goes to the consolidator."""
     state = _state(response_check_approved=True)
 
-    assert builder._route_from_response_check(state) == END
+    assert builder._route_from_response_check(state) == builder.CONSOLIDATOR
 
 
 def test_route_from_response_check_rejected_goes_back_to_roteador():
@@ -299,7 +299,7 @@ def test_the_response_checker_only_ends_or_retries():
     for branch in graph.branches[builder.RESPONSE_CHECKER].values():
         ends.update(branch.ends or {})
 
-    assert ends == {"Roteador", END}
+    assert ends == {"Roteador", builder.CONSOLIDATOR, END}
 
 
 def test_the_report_flow_never_reaches_the_response_checker():

@@ -305,6 +305,9 @@ class Processing:
         id_request: What the API correlates this request by, echoed into its
             event tracking. Empty for a run opened outside the public facade,
             which nobody is going to persist.
+        pending_writes: The write intents the run's writing tools staged. Created
+            with the handle, before the graph runs, so tools running in copied
+            contexts append to this same list.
     """
 
     def __init__(self, flow: Flow, module: str, id_request: str = ""):
@@ -326,6 +329,8 @@ class Processing:
         self._items: list[tuple[str, str]] = []
 
         self._agents: list[AgentCall] = []
+
+        self.pending_writes: list[Any] = []
 
         self._failure: str | None = None
 
