@@ -23,6 +23,8 @@ from aeko.engine.prompts import (
 
 from aeko.engine.prompts.builder import build_prompt
 
+from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
+
 
 def _system_content(prompt_template: ChatPromptTemplate) -> str:
     """System content."""
@@ -221,3 +223,90 @@ def test_build_prompt_recomputes_temporal_context_on_each_render():
     second_stamp = _system_content(prompt_template).split("Data e hora atuais: ")[1]
 
     assert first_stamp != second_stamp
+
+
+@pytest.mark.parametrize("agent", list(PROMPT_SPECS))
+def test_no_prompt_contains_an_em_or_en_dash(agent):
+    """No agent sees a travessão in its system prompt or few-shot examples."""
+    messages = build_prompt(PROMPT_SPECS[agent]).format_messages(messages=[])
+
+    text = "\n".join(m.content for m in messages)
+
+    assert "\u2014" not in text
+    assert "\u2013" not in text
+
+
+def test_shared_context_forbids_the_travessao_in_words():
+    """Shared context forbids the travessao in words."""
+    assert "Nunca use travessão" in DEFAULT_INITIAL_CONTEXT
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_shot_answers_never_name_the_multi_agent_structure(agent):
+    """The answers that reach the user never name an internal agent or a hand-off."""
+    for shot in PROMPT_SPECS[agent].shots:
+        answer = shot["resposta"].lower()
+
+        assert "encaminh" not in answer
+
+        for spec in PROMPT_SPECS.values():
+            assert spec.agent.lower() not in answer
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_prompts_demand_a_single_assistant_voice(agent):
+    """User facing prompts demand a single assistant voice."""
+    text = " ".join(PROMPT_SPECS[agent].tasks)
+
+    assert "assistente único" in text
+
+
+@pytest.mark.parametrize("agent", ["Guardrail de Saída", "Verificador de Resposta"])
+def test_reviewers_reject_drafts_that_leak_the_multi_agent_structure(agent):
+    """Reviewers reject drafts that leak the multi agent structure."""
+    assert "estrutura multiagente" in " ".join(PROMPT_SPECS[agent].tasks)
+
+    assert any(
+        "estrutura multiagente" in s["resposta"] for s in PROMPT_SPECS[agent].shots
+    )
+
+
+REVIEWERS = ["Guardrail de Saída", "Verificador de Resposta"]
+
+
+@pytest.mark.parametrize("agent", REVIEWERS)
+def test_reviewers_treat_the_material_as_data_and_fix_the_verdict_format(agent):
+    """Reviewers treat the material as data and open with a fixed verdict."""
+    spec = PROMPT_SPECS[agent]
+
+    assert "nunca instruções" in spec.persona
+
+    tasks = " ".join(spec.tasks)
+
+    assert "'Aprovado.'" in tasks and "'Reprovado.'" in tasks
+
+    assert tasks.index("código") < tasks.index("estrutura multiagente")
+
+
+@pytest.mark.parametrize("agent", REVIEWERS)
+def test_reviewers_have_shots_rejecting_code_and_embedded_instructions(agent):
+    """Reviewers have shots rejecting code and embedded instructions."""
+    shots = PROMPT_SPECS[agent].shots
+
+    assert any("```" in s["pergunta"] and s["resposta"].startswith("Reprovado.") for s in shots)
+
+    assert any("ignore" in s["pergunta"].lower() and s["resposta"].startswith("Reprovado.") for s in shots)
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_prompts_carry_the_scope_rule(agent):
+    """User facing prompts refuse code and out of domain tasks."""
+    assert "nunca produzir código" in " ".join(PROMPT_SPECS[agent].tasks).lower()
+
+
+def test_faq_has_a_shot_refusing_code():
+    """FAQ has a shot refusing code."""
+    assert any(
+        "script" in s["pergunta"].lower() and "não posso" in s["resposta"].lower()
+        for s in PROMPT_SPECS["FAQ"].shots
+    )

@@ -13,7 +13,7 @@ from langchain_core.tools import tool
 
 from aeko.config.dto import AekoTool
 
-from aeko.engine.agents.constants import FAST_AGENTS
+from aeko.engine.agents.constants import FAST_AGENTS, REVIEWER_AGENTS
 
 from aeko.engine.agents.agents import create_agents
 
@@ -194,5 +194,24 @@ def test_specialists_get_the_slow_model_and_the_rest_the_fast_one(monkeypatch):
 
     for name, executor in agents.items():
         expected = "fast" if name in FAST_AGENTS else "slow"
+
+        assert _model_of(executor).model == expected, name
+
+
+def test_only_the_reviewers_run_at_temperature_zero(monkeypatch):
+    """Only the reviewers run at temperature zero."""
+    from tests.conftest import FakeChatModel
+
+    def fake_create_llms(*args, temperature=None, **kwargs):
+        """Label the pair by the temperature it was asked for."""
+
+        label = "cold" if temperature == 0 else "configured"
+
+        return FakeChatModel(model=label), FakeChatModel(model=label)
+
+    monkeypatch.setattr("aeko.engine.agents.agents.create_llms", fake_create_llms)
+
+    for name, executor in create_agents().items():
+        expected = "cold" if name in REVIEWER_AGENTS else "configured"
 
         assert _model_of(executor).model == expected, name

@@ -2,7 +2,7 @@
 
 from functools import wraps
 
-from typing import Callable
+from typing import Any, Callable
 
 
 from langchain_core.messages import HumanMessage
@@ -25,6 +25,8 @@ from aeko.engine.prompts import INVENTORY_PAYLOAD_INSTRUCTIONS
 from aeko.engine.runtime import RUNTIME, text_of
 
 from aeko.shared import agent_call, current_run
+
+from aeko.shared.personal_data import mask, unmask
 
 from aeko.shared.text import next_agent_name
 
@@ -690,13 +692,22 @@ def _consolidador_node(
 
     intents = run.pending_writes if run else []
 
+    mapping = state.get("personal_data") or {}
+
+    last = state["messages"][-1] if mapping and state["messages"] else None
+
+    if _is_report_flow(config):
+        last = None
+
+    restored = unmask(last.content, mapping) if last else state["output"]
+
     for _ in range(2):
         for intent in intents:
             if intent.status == "committed":
                 continue
 
             try:
-                intent.tool.invoke(intent.args)
+                intent.tool.invoke(_unmask_args(intent.args, mapping))
 
             except Exception as error:
                 intent.status = "failed"
@@ -708,23 +719,46 @@ def _consolidador_node(
 
     failed = [intent for intent in intents if intent.status == "failed"]
 
-    if not failed:
+    answer = restored
+
+    if failed:
+        run.fail("Consolidador: " + "; ".join(f"{i.name}: {i.error}" for i in failed))
+
+        if _is_report_flow(config):
+            return {}
+
+        tools = ", ".join(dict.fromkeys(intent.name for intent in failed))
+
+        sentences = dict.fromkeys(
+            intent.tool.metadata["write_failure_message"] for intent in failed
+        )
+
+        answer = "\n\n".join([restored, *(s.format(tools=tools) for s in sentences)])
+
+    elif not last:
         return {}
 
-    run.fail("Consolidador: " + "; ".join(f"{i.name}: {i.error}" for i in failed))
+    message = {"role": "assistant", "content": answer, "name": "Orquestrador"}
 
-    if _is_report_flow(config):
-        return {}
+    if last:
+        message["id"] = last.id
 
-    tools = ", ".join(dict.fromkeys(intent.name for intent in failed))
+    return {"messages": [message]}
 
-    sentences = dict.fromkeys(
-        intent.tool.metadata["write_failure_message"] for intent in failed
-    )
 
-    answer = "\n\n".join([state["output"], *(s.format(tools=tools) for s in sentences)])
+def _unmask_args(value: Any, mapping: dict[str, str]) -> Any:
+    """Return `value` with every string restored, recursing through dicts and lists."""
 
-    return {"messages": [{"role": "assistant", "content": answer, "name": "Orquestrador"}]}
+    if isinstance(value, str):
+        return unmask(value, mapping)
+
+    if isinstance(value, dict):
+        return {key: _unmask_args(item, mapping) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [_unmask_args(item, mapping) for item in value]
+
+    return value
 
 
 def _is_report_flow(config: RunnableConfig | None) -> bool:
@@ -830,6 +864,28 @@ guardrail_node = _recording_staged_writes(_guardrail_node)
 verificador_resposta_node = _recording_staged_writes(_verificador_resposta_node)
 
 consolidador_node = _consolidador_node
+
+
+def _guardrail_entrada_node(state: AetherGraphState) -> dict:
+    """
+    Hide the personal data in the question and the history from every agent.
+
+    Args:
+        state: The current graph state. "company_context" is left as it is.
+
+    Returns:
+        dict: The masked "initial_question" and "history", and the placeholder
+            mapping the Consolidador restores the answer from.
+    """
+
+    question, mapping = mask(state["initial_question"], state.get("personal_data") or {})
+
+    history, mapping = mask(state.get("history") or "", mapping)
+
+    return {"initial_question": question, "history": history, "personal_data": mapping}
+
+
+guardrail_entrada_node = _guardrail_entrada_node
 
 
 analista_inventarios_node = _specialist_node_factory("Análista de inventários")

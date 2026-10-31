@@ -248,15 +248,11 @@ def test_intents_of_every_attempt_are_committed_when_a_retry_is_approved(
     assert writes == ["gestor", "gestor"]
 
 
-def test_the_faq_ending_commits_nothing(register_writer, writes, run_turn):
-    """The FAQ ending commits nothing."""
-    register_writer(agent="FAQ")
+def test_the_faq_ends_through_the_consolidador(run_turn):
+    """The FAQ ends through the Consolidador, which restores personal data."""
+    visited, _ = run_turn(FAQ_FLOW)
 
-    visited, _ = run_turn(FAQ_FLOW, tool_caller="FAQ")
-
-    assert writes == []
-
-    assert "Consolidador" not in visited
+    assert "Consolidador" in visited
 
 
 def test_a_write_that_fails_once_is_retried_and_reports_nothing(
@@ -548,3 +544,72 @@ def test_the_context_message_of_an_agent_that_writes_is_also_built_for_reviewers
     register_writer(agent="Verificador de Resposta")
 
     assert "save_profile" in _build_response_check_message(state).content
+
+
+def test_restoring_reuses_the_message_id_so_the_reducer_replaces_it():
+    """The restored answer replaces the delivered one instead of adding a second."""
+    from langchain_core.messages import AIMessage
+    from langgraph.graph.message import add_messages
+
+    from aeko.engine.graph.nodes import consolidador_node
+
+    sent = add_messages([], [AIMessage(content="CPF [CPF_1]", name="Orquestrador")])
+
+    update = consolidador_node(
+        {"messages": sent, "output": "CPF [CPF_1]", "personal_data": {"[CPF_1]": "529.982.247-25"}}
+    )
+
+    merged = add_messages(sent, update["messages"])
+
+    assert [m.content for m in merged] == ["CPF 529.982.247-25"]
+
+
+def test_an_empty_mapping_changes_nothing():
+    """Without personal data the Consolidador adds no message."""
+    from aeko.engine.graph.nodes import consolidador_node
+
+    assert consolidador_node({"messages": [], "output": "x", "personal_data": {}}) == {}
+
+
+def _commit_with(args, mapping):
+    """Commit one staged write with `args` and return what the real tool got."""
+    from aeko.engine.agents.writes import WriteIntent
+    from aeko.engine.graph.nodes import consolidador_node
+
+    received = []
+
+    def save_profile(phone: str = "", extra: dict | None = None, n: int = 0) -> str:
+        """Save."""
+
+        received.append(
+            {k: v for k, v in dict(phone=phone, extra=extra, n=n).items() if k in args}
+        )
+
+        return "saved"
+
+    tool = StructuredTool.from_function(func=save_profile)
+
+    with processing(Flow.CONVERSATIONAL, "test") as run:
+        run.pending_writes.append(WriteIntent("save_profile", tool, args))
+
+        consolidador_node({"messages": [], "output": "x", "personal_data": mapping})
+
+    return received
+
+
+def test_a_staged_write_is_committed_with_the_real_personal_data_even_nested():
+    """Placeholders in staged arguments are restored, recursively."""
+    args = {"phone": "[PHONE_1]", "extra": {"list": ["[PHONE_1]", 3]}, "n": 7}
+
+    received = _commit_with(args, {"[PHONE_1]": "11 91234-5678"})
+
+    assert received == [
+        {"phone": "11 91234-5678", "extra": {"list": ["11 91234-5678", 3]}, "n": 7}
+    ]
+
+    assert args["phone"] == "[PHONE_1]"
+
+
+def test_staged_arguments_pass_unchanged_with_an_empty_mapping():
+    """Without personal data the arguments are committed as staged."""
+    assert _commit_with({"phone": "[PHONE_1]"}, {}) == [{"phone": "[PHONE_1]"}]

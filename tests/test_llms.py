@@ -167,3 +167,25 @@ def test_slow_llm_falls_back_to_the_fast_one(llms):
     response = slow_llm.invoke("What is the capital of Germany?")
 
     assert DEFAULT_FAST_MODEL in response.content
+
+
+def test_temperature_can_be_overridden_for_both_models():
+    """Temperature can be overridden for both models, with the fallback too."""
+    Aeko.config(API_KEY, temperature=0.7)
+
+    fast_llm, slow_llm = create_llms(temperature=0)
+
+    assert fast_llm.runnable.temperature == 0
+
+    assert fast_llm.fallbacks[0].temperature == 0
+
+    assert slow_llm.runnable.temperature == 0
+
+
+def test_temperature_defaults_to_the_configured_one():
+    """Temperature defaults to the configured one."""
+    Aeko.config(API_KEY, temperature=0.7)
+
+    fast_llm, _ = create_llms()
+
+    assert fast_llm.runnable.temperature == 0.7
