@@ -96,6 +96,7 @@ REJECTED_FLOW = {
 PLAN_FIELDS = {
     "defined_problem": "Os fornos a gas natural concentram a emissao de CO2.",
     "method": "Migrar a carga termica para hidrogenio verde.",
+    "recommended_gases": "[]",
     "reasoning": "A combustao e a fonte dominante e o ROI paga a troca.",
 }
 

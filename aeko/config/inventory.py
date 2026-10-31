@@ -20,6 +20,7 @@ from aeko.config.dto import (
     AekoExtractedInventory,
     AekoImprovementPlan,
     AekoInventoryCatalogs,
+    AekoRecommendedGas,
 )
 
 from aeko.config.exceptions import MalformedAgentOutputError
@@ -106,6 +107,38 @@ def _plan_sections_in(answer: str) -> dict[str, str]:
     return {field: text for field, text in sections.items() if text}
 
 
+def _recommended_gases_in(body: str) -> list[AekoRecommendedGas]:
+    """
+    Read the "Gases recomendados" section as a list of recommended gases.
+
+    Args:
+        body: The text of the section, expected to be a JSON array.
+
+    Returns:
+        list[AekoRecommendedGas]: The validated, rounded items; empty for `[]`.
+
+    Raises:
+        ValueError: If the body holds no JSON array, or the array is not 0 to 2
+            valid recommended gases (`ValidationError` is one).
+    """
+
+    start, end = body.find("["), body.rfind("]")
+
+    if start < 0 or end < start:
+        raise ValueError("a seção deve conter um array JSON")
+
+    try:
+        items = json.loads(_repair_serialization(body[start : end + 1]))
+
+    except json.JSONDecodeError as error:
+        raise ValueError(f"JSON inválido: {error}") from error
+
+    if len(items) > 2:
+        raise ValueError("no máximo 2 itens")
+
+    return [AekoRecommendedGas.model_validate(item) for item in items]
+
+
 def _format_problems_in(answer: str) -> list[str]:
     """
     List what the coordinator still has to fix in an answer, for the agent to read.
@@ -125,11 +158,24 @@ def _format_problems_in(answer: str) -> list[str]:
 
     sections = _plan_sections_in(answer)
 
-    return [
+    problems = [
         f'A seção "## {PLAN_SECTIONS[field]}" está ausente ou vazia, e é obrigatória.'
         for field in PLAN_FIELDS
         if field not in sections
     ]
+
+    if "recommended_gases" in sections:
+        try:
+            _recommended_gases_in(sections["recommended_gases"])
+
+        except ValueError as error:
+            problems.append(
+                f'A seção "## {PLAN_SECTIONS["recommended_gases"]}" deve ser um array '
+                "JSON com 0 a 2 itens de scope (1, 2 ou 3), emission (>= 0), "
+                f"reduction_percentage (0 a 100) e name (não vazio): {error}"
+            )
+
+    return problems
 
 
 def _without_inventory_block(answer: str) -> str:
@@ -337,11 +383,22 @@ def _to_improvement_plan(
             + ", ".join(f"{field} (## {PLAN_SECTIONS[field]})" for field in missing)
         )
 
+    try:
+        recommended_gases = _recommended_gases_in(sections["recommended_gases"])
+
+    except ValueError as error:
+        raise MalformedAgentOutputError(
+            f'A seção "## {PLAN_SECTIONS["recommended_gases"]}" do plano de melhoria '
+            f"é inválida, nem após {PLAN_FORMAT_MAX_RETRIES} tentativas de correção: "
+            f"{error}"
+        ) from error
+
     return AekoImprovementPlan(
         id_external_inventory=id_external_inventory,
         defined_problem=sections["defined_problem"],
         method=sections["method"],
         reasoning=sections["reasoning"],
+        recommended_gases=recommended_gases,
     )
 
 

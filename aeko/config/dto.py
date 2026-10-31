@@ -293,6 +293,34 @@ class AekoMessageResponse(BaseModel):
     guardrail_retries: int = Field(default=0, ge=0)
 
 
+class AekoRecommendedGas(BaseModel):
+    """
+    One gas substitution recommended by the continuous improvement coordinator.
+
+    Attributes:
+        scope: The GHG scope the swap applies to (1, 2 or 3), not a catalog id.
+        emission: Projected tCO2e after the swap, rounded to 2 decimals.
+        reduction_percentage: Drop versus the current emission of the replaced
+            gas, 0 to 100, rounded to 2 decimals.
+        name: The substitute gas, free text (it may not exist in the catalog).
+    """
+
+    scope: Literal[1, 2, 3]
+
+    emission: float = Field(ge=0)
+
+    reduction_percentage: float = Field(ge=0, le=100)
+
+    name: str = Field(min_length=1)
+
+    @field_validator("emission", "reduction_percentage")
+    @classmethod
+    def _round_to_two_decimals(cls, value: float) -> float:
+        """Round the floats to 2 decimals, so every consumer reads the same values."""
+
+        return round(value, 2)
+
+
 class AekoImprovementPlan(BaseModel):
     """
     The plan returned by `AekoInventoryAnalyzer.analyze()`, mirroring one
@@ -300,7 +328,7 @@ class AekoImprovementPlan(BaseModel):
 
     The continuous improvement coordinator is instructed to answer in exactly
     these fields (see its prompt spec), so what the model writes and what the
-    API persists are the same three pieces of text — no prose left for the
+    API persists are the same pieces of text and the recommended gases — no prose left for the
     caller to split apart.
 
     Attributes:
@@ -309,6 +337,8 @@ class AekoImprovementPlan(BaseModel):
         defined_problem: The problem the analysis identified.
         method: What to do about it.
         reasoning: Why that method addresses that problem.
+        recommended_gases: Up to 2 gas substitutions the analysis recommends.
+            Empty when none applies, which is a valid outcome.
         updated_at: When the plan was produced.
     """
 
@@ -323,6 +353,10 @@ class AekoImprovementPlan(BaseModel):
     method: str
 
     reasoning: str
+
+    recommended_gases: list[AekoRecommendedGas] = Field(
+        default_factory=list, max_length=2
+    )
 
     updated_at: datetime = Field(default_factory=_now)
 
