@@ -70,7 +70,7 @@ system is the same; **how you hand work to it changed, and every change is break
 | Data objects | Dataclasses describing a call (`SessionInfo`, `MessageResponse`, …) | Pydantic models mirroring the MongoDB collections, field for field |
 | Session handling | `prepare(session_id, user_info, history)`, then a process-wide session cache | No `prepare()`: the `AekoSession` document travels with every `send_message()` call |
 | Chat result | One `answer` string, always populated | `AekoMessageResponse` — the turn to persist, plus the run's metadata and token cost |
-| Inventory result | Prose the caller had to split apart | `AekoImprovementPlan`, parsed from three fixed sections, with retry |
+| Inventory result | Prose the caller had to split apart | `AekoImprovementPlan`, parsed from four fixed sections, with retry |
 | User context | Nothing | `AekoUser.role`/`usecase` and every `AekoUserMemory` reach every agent |
 | Configuration | Several caches, each invalidated by hand | One runtime; writing any setting drops the agents on its own |
 
@@ -996,6 +996,7 @@ MongoDB collection, field for field:
 | `AekoSession` | `session` |
 | `AekoMessage` | `session.messages[]` |
 | `AekoImprovementPlan` | `improvement_plan` |
+| `AekoRecommendedGas` | `improvement_plan.recommended_gases[]` |
 
 `model_validate(document)` takes a raw document and `model_dump(by_alias=True)` gives one
 back — `_id` included, under that exact name — so the hand-off is lossless in both
