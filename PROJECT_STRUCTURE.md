@@ -149,8 +149,11 @@ coordinator node** and only re-ask that agent.
 Order is fixed:
 
 1. Run the graph; parse the **plan** from `## Problema definido` / `## Método`
-   / `## Raciocínio` (`PLAN_SECTIONS`). Missing sections → rewrite in-graph,
-   then `MalformedAgentOutputError`. Do not invent plan fields.
+   / `## Gases recomendados` / `## Raciocínio` (`PLAN_SECTIONS`). Only
+   `## Gases recomendados` is read as JSON: an array of 0 to 2
+   `AekoRecommendedGas`, where `[]` is a valid answer. Missing or invalid
+   sections → rewrite in-graph, then `MalformedAgentOutputError`. Do not
+   invent plan fields.
 2. **Salvage** JSON: ` ```inventory ` fence first; if absent, a single object
    after Raciocínio (FR-C02). JSON in other sections is not a payload.
 3. Strip recovered JSON from the plan text so it cannot leak into
