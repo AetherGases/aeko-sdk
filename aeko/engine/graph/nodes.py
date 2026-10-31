@@ -587,23 +587,58 @@ def _consolidador_node(state: AetherGraphState) -> dict:
 
     Reached only on the endings that deliver a result, so a turn that gave up
     never changes anything. Every intent the run collected is invoked in order,
-    retried attempts included: nothing is deduplicated.
+    retried attempts included: nothing is deduplicated. A failure never stops
+    the others: pass 1 tries every intent, pass 2 retries the failed ones once,
+    with no backoff.
+
+    What still fails is reported through the run's error description, and the
+    failed tool's "write_failure_message" sentence is appended to the answer.
+    Arguments are never part of either.
 
     Args:
-        state: The current graph state (unused, kept for the node signature).
+        state: The current graph state, whose "output" holds the approved answer.
 
     Returns:
-        dict: An empty state update — the answer is already in "messages".
+        dict: The state update — empty when every write committed, otherwise the
+            answer with the failure sentence appended.
     """
 
     run = current_run()
 
-    for intent in run.pending_writes if run else []:
-        intent.tool.invoke(intent.args)
+    intents = run.pending_writes if run else []
 
-        intent.status = "committed"
+    for _ in range(2):
+        for intent in intents:
+            if intent.status == "committed":
+                continue
 
-    return {}
+            try:
+                intent.tool.invoke(intent.args)
+
+            except Exception as error:
+                intent.status = "failed"
+
+                intent.error = str(error)
+
+            else:
+                intent.status = "committed"
+
+    failed = [intent for intent in intents if intent.status == "failed"]
+
+    if not failed:
+        return {}
+
+    run.fail("Consolidador: " + "; ".join(f"{i.name}: {i.error}" for i in failed))
+
+    tools = ", ".join(dict.fromkeys(intent.name for intent in failed))
+
+    sentences = dict.fromkeys(
+        intent.tool.metadata["write_failure_message"] for intent in failed
+    )
+
+    answer = "\n\n".join([state["output"], *(s.format(tools=tools) for s in sentences)])
+
+    return {"messages": [{"role": "assistant", "content": answer, "name": "Orquestrador"}]}
 
 
 def _is_report_flow(config: RunnableConfig | None) -> bool:

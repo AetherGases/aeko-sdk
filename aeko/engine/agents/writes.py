@@ -20,7 +20,9 @@ class WriteIntent:
         name: The tool's name.
         tool: The real tool, which only the Consolidador invokes.
         args: The arguments the agent called it with.
-        status: "staged" until the Consolidador commits it.
+        status: "staged" until the Consolidador commits it ("committed"), or
+            gives up on it ("failed").
+        error: The last error the real tool raised, for a failed intent.
     """
 
     name: str
@@ -30,6 +32,8 @@ class WriteIntent:
     args: dict[str, Any]
 
     status: str = "staged"
+
+    error: str | None = None
 
 
 def is_writing(tool: Any) -> bool:

@@ -31,6 +31,7 @@ from tests.conftest import FakeChatModel, agent_name_from
 
 from tests.test_graph_e2e import (
     CHECKER_REJECTING_FLOW,
+    CONSOLIDATED_ANSWER,
     FULL_FLOW,
     INITIAL_QUESTION,
     REJECTING_FLOW,
@@ -38,6 +39,16 @@ from tests.test_graph_e2e import (
 
 
 STAGED_ACK = '{"staged": true}'
+
+FAILURE_SENTENCE = "Não consegui salvar: {tools}."
+
+REJECTED_THEN_APPROVED = {
+    **FULL_FLOW,
+    "Guardrail de Saída": [
+        "Reprovado. Faltam dados.\nNext agent: Nenhum",
+        "Aprovado. Resposta fundamentada.\nNext agent: Nenhum",
+    ],
+}
 
 FAQ_FLOW = {
     "Roteador": "Pergunta simples.\nNext agent: FAQ",
@@ -93,8 +104,10 @@ def register_writer(writes, monkeypatch):
 
     Aeko.config("fake-api-key")
 
-    def _register(agent="Roteador", is_writing=True):
-        """Register."""
+    def _register(agent="Roteador", is_writing=True, fail_on=()):
+        """Register; `fail_on` lists the 1-based real calls that raise."""
+
+        calls = []
 
         def save_profile(role: str) -> str:
             """Save the user's role."""
@@ -103,11 +116,16 @@ def register_writer(writes, monkeypatch):
 
             return "saved"
 
+            calls.append(role)
+
+            if len(calls) in fail_on:
+                raise RuntimeError("boom")
+
         tool = StructuredTool.from_function(
             func=save_profile,
             name="save_profile",
             description="Save the user's role.",
-            metadata={"is_writing": is_writing},
+            metadata={"is_writing": is_writing, "write_failure_message": FAILURE_SENTENCE},
         )
 
         AekoMessenger.set_tools({agent: [tool]})
@@ -118,7 +136,14 @@ def register_writer(writes, monkeypatch):
 
 
 @pytest.fixture
-def run_turn(monkeypatch, writes):
+def last_turn():
+    """What the last `run_turn` left behind: its run handle and delivered answer."""
+
+    return {}
+
+
+@pytest.fixture
+def run_turn(monkeypatch, writes, last_turn):
     """Run the graph inside a bound run, returning the visited nodes and the model."""
 
     def _run(responses, tool_caller="Roteador"):
@@ -136,7 +161,7 @@ def run_turn(monkeypatch, writes):
 
         state = create_initial_state(INITIAL_QUESTION)
 
-        with processing(Flow.CONVERSATIONAL, "test"):
+        with processing(Flow.CONVERSATIONAL, "test") as run:
             updates = list(
                 get_app().stream(
                     state,
@@ -148,6 +173,15 @@ def run_turn(monkeypatch, writes):
         return [name for update in updates for name in update], llm
 
     return _run
+
+        delivered = [
+            message["content"]
+            for update in updates
+            for change in update.values()
+            for message in (change or {}).get("messages", [])
+        ]
+
+        last_turn.update(run=run, answer=delivered[-1] if delivered else None)
 
 
 def test_an_approved_turn_writes_once_and_only_when_consolidating(
@@ -223,6 +257,57 @@ def test_a_writing_tool_called_outside_a_run_executes_immediately(
     register_writer, writes, use_fake_llm
 ):
     """A writing tool called outside a run executes immediately."""
+def test_a_write_that_fails_once_is_retried_and_reports_nothing(
+    register_writer, writes, run_turn, last_turn
+):
+    """A write that fails once is retried and reports nothing."""
+    register_writer(fail_on={1})
+
+    run_turn(FULL_FLOW)
+
+    assert writes == ["gestor"]
+
+    assert last_turn["run"].event_tracking().error_description is None
+
+    assert last_turn["answer"] == f"{CONSOLIDATED_ANSWER}\nNext agent: Guardrail de Saída"
+
+
+def test_a_write_that_fails_twice_is_reported_in_the_metrics_and_the_answer(
+    register_writer, writes, run_turn, last_turn
+):
+    """A write that fails twice is reported in the metrics and the answer."""
+    register_writer(fail_on={1, 2})
+
+    run_turn(FULL_FLOW)
+
+    assert writes == []
+
+    assert (
+        last_turn["run"].event_tracking().error_description
+        == "Consolidador: save_profile: boom"
+    )
+
+    assert last_turn["answer"].endswith("Não consegui salvar: save_profile.")
+
+    assert "gestor" not in last_turn["answer"]
+
+
+def test_a_persistent_failure_does_not_stop_the_other_writes(
+    register_writer, writes, run_turn, last_turn
+):
+    """A persistent failure does not stop the other writes."""
+    register_writer(fail_on={1, 3})
+
+    run_turn(REJECTED_THEN_APPROVED)
+
+    assert writes == ["gestor"]
+
+    assert (
+        last_turn["run"].event_tracking().error_description
+        == "Consolidador: save_profile: boom"
+    )
+
+
     register_writer()
 
     use_fake_llm()
