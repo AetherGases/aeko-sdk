@@ -5,6 +5,7 @@ DEFAULT_INITIAL_CONTEXT = "Você é um agente do ecossistema Aether: uma empresa
 PLAN_SECTIONS: dict[str, str] = {
     "defined_problem": "Problema definido",
     "method": "Método",
+    "recommended_gases": "Gases recomendados",
     "reasoning": "Raciocínio",
 }
 

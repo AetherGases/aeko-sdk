@@ -36,7 +36,7 @@ def test_inventory_instructions_require_plan_sections_then_one_inventory_fence()
 
     lowered = INVENTORY_PAYLOAD_INSTRUCTIONS.lower()
 
-    assert "três seções" in lowered or "tres secoes" in lowered.replace("ê", "e")
+    assert "quatro seções" in lowered or "quatro secoes" in lowered.replace("ê", "e")
 
     assert INVENTORY_PAYLOAD_INSTRUCTIONS.count("```inventory") == 1
 

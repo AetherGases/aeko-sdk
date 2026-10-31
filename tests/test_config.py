@@ -94,6 +94,7 @@ CHECKER_REJECTED_FLOW = {
 PLAN_FIELDS = {
     "defined_problem": "Os fornos a gas natural concentram a emissao de CO2 do inventario.",
     "method": "Trocar os queimadores e migrar a carga termica para hidrogenio verde.",
+    "recommended_gases": "[]",
     "reasoning": "A combustao e a fonte dominante, e o ROI de 14 meses paga a substituicao.",
 }
 
@@ -1095,6 +1096,7 @@ def test_the_plan_mirrors_the_collection(configured, use_fake_llm):
         "defined_problem",
         "method",
         "reasoning",
+        "recommended_gases",
         "updated_at",
     }
 

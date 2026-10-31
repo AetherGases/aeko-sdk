@@ -300,6 +300,7 @@ def test_the_plan_contract_is_unchanged_when_inventory_is_present(
         "defined_problem",
         "method",
         "reasoning",
+        "recommended_gases",
         "updated_at",
     }
 

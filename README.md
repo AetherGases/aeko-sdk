@@ -524,10 +524,11 @@ from the same call as foreign keys.
 | `defined_problem` | The problem the analysis identified. |
 | `method` | What to do about it. |
 | `reasoning` | Why that method addresses that problem. |
+| `recommended_gases` | Up to 2 recommended gas substitutions (`AekoRecommendedGas`), `[]` when none applies — a valid outcome, never a failure. Defaults to `[]` for plans built by hand. |
 | `updated_at` | When the plan was produced (UTC). |
 
 The continuous improvement coordinator is instructed — in its scope, its tasks and every
-one of its few-shot examples — to write exactly those three text fields under three fixed
+one of its few-shot examples — to write exactly those plan fields under four fixed
 headings, and the SDK reads them straight back out:
 
 ```text
@@ -537,17 +538,25 @@ headings, and the SDK reads them straight back out:
 ## Método
 ...
 
+## Gases recomendados
+[]
+
 ## Raciocínio
 ...
 ```
+
+The `## Gases recomendados` body is the only one read as JSON: an array of 0 to 2 items,
+each `{"scope": 1|2|3, "emission": tCO2e >= 0, "reduction_percentage": 0..100, "name": "..."}`.
+Both floats are rounded to 2 decimals. A missing section, invalid JSON, more than 2 items or
+an out-of-bounds value is sent back like a missing section; `[]` is accepted as is.
 
 Headings rather than a JSON object, for the same reason the agents route on a literal
 `Next agent:` line: this flow runs with the report token cap, and a truncated JSON object
 is unparseable and costs the whole plan, while a truncated last section still yields the
 ones written before it. That truncation argument applies to the **plan in sections**, not
 to `inventory`: on the happy path the coordinator still writes a separate fenced
-```inventory JSON block after the three headings. The graph does **not** use structured
-output for the whole answer — only free-form prose plus that fence. Only those three
+```inventory JSON block after the four headings. The graph does **not** use structured
+output for the whole answer — only free-form prose plus that fence. Only those four
 headings delimit a plan section, so a subtitle the agent writes mid-answer never cuts its
 own text short — and case and accents are ignored when matching them, so `## RACIOCINIO`
 is read as `## Raciocínio`.
@@ -558,7 +567,7 @@ with the missing headings named and the original request attached, up to four ti
 coordinator — the inventory, pollutant and green gas analysts already ran, and their
 findings stay in the state. If the format never comes, `analyze()` raises
 `MalformedAgentOutputError` rather than padding the plan with guesses. The model is never
-given a say in `_id` or `updated_at` — only the three content fields are read back from it.
+given a say in `_id` or `updated_at` — only the content fields are read back from it.
 
 **After the graph**, the SDK parses the plan first, then recovers `inventory` in a
 deterministic step that does not re-run the analysts:

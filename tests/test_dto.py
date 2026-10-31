@@ -89,6 +89,14 @@ IMPROVEMENT_PLAN_DOC = {
         "A emissão de gases em corpos vivos, estão na maioria das vezes, "
         "relacioadas a alimentação."
     ),
+    "recommended_gases": [
+        {
+            "scope": 1,
+            "emission": 120.5,
+            "reduction_percentage": 35.25,
+            "name": "Biometano",
+        }
+    ],
     "updated_at": "2026-08-28T12:10:00Z",
 }
 
