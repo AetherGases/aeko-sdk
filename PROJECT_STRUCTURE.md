@@ -26,7 +26,7 @@ scratch/                   # working specs and tickets; not shipped
 
 | Package | Owns | May import |
 | --- | --- | --- |
-| `aeko.shared` | Logs, `processing()`, `agent_call()`, routing-marker helpers | nothing from `config` or `engine` |
+| `aeko.shared` | Logs, `processing()`, `agent_call()`, routing-marker helpers, personal data masking | nothing from `config` or `engine` |
 | `aeko.engine` | Runtime, LLMs, agents, prompts, graph | `shared` only at module load |
 | `aeko.config` | Facade the API consumes | `engine` and `shared` |
 | `aeko.side_content` | Summariser | `engine` / `shared` as needed |
@@ -94,7 +94,8 @@ as in `AGENT_NAMES`, accents included, including the historical
 - No `GEMINI_API_KEY` / `.env` fallback. Missing key → `AekoNotConfiguredError`.
 - Fast agents (router, FAQ, orchestrator, both reviewers) use `fast_model`;
   specialists use `slow_model`. Each LLM is registered with the other as
-  `with_fallbacks`.
+  `with_fallbacks`. The reviewers (`REVIEWER_AGENTS`) get their own fast pair
+  at temperature 0; every other agent keeps the configured temperature.
 - Chat runs use `max_tokens`; `analyze()` uses `report_max_tokens`.
 - Tools are declared once: description in the prompt **and** bound on the
   executor. Unknown agent keys → `UnknownAgentError`.
@@ -113,8 +114,16 @@ Handoff is **prose**, not provider structured-output on `create_agent`:
   tests still assume a string. Native Gemini schema on agent creation is
   **out of scope** until that design exists.
 
-Conversational flow: `Roteador` → specialists / FAQ → `Orquestrador` →
-`Guardrail de Saída` → `Verificador de Resposta`. Each reviewer may send the
+Conversational flow: `Guardrail de Entrada` (`INPUT_GUARDRAIL`) → `Roteador`
+→ specialists / FAQ → `Orquestrador` → `Guardrail de Saída` →
+`Verificador de Resposta` → `Consolidador`. The FAQ ends at `Consolidador`
+too. `Guardrail de Entrada` masks CPF, CNPJ, card and phone numbers in the
+question and history (`aeko.shared.personal_data`), keeping the mapping in
+the `personal_data` state field; agents only ever see placeholders such as
+`[CPF_1]`. `Consolidador` puts the real values back into the delivered answer
+(same message id, never a second message) and into staged write arguments.
+User-facing prompts never name agents or routing, and contain no em or en
+dash. Each reviewer may send the
 turn back at most `GUARD_RAIL_MAX_RETRIES` / `RESPONSE_CHECK_MAX_RETRIES`
 (2) times. Exhaustion → `MalformedAgentOutputError`, no empty `output`.
 
@@ -125,7 +134,8 @@ Writing tools (`metadata["is_writing"] is True`) do not write mid-run: inside a
 bound run each call is staged on `Processing.pending_writes` and answers
 `{"staged": true}`. `Consolidador` (`CONSOLIDATOR`) commits them, and only
 after an approved `Verificador de Resposta` or the report flow's coordinator.
-Retry-cap and FAQ endings never commit. A write that still fails after one
+Retry-cap endings never commit; the FAQ has no writing tools, so its ending
+commits nothing. A write that still fails after one
 retry sets the run's error description; in chat it also appends the tool's
 `metadata["write_failure_message"]` to the answer. The report is never altered.
 
