@@ -1461,7 +1461,7 @@ def test_analyze_uses_the_report_token_cap(configured, monkeypatch):
         **CATALOGS,
     )
 
-    assert caps == [DEFAULT_REPORT_MAX_TOKENS]
+    assert set(caps) == {DEFAULT_REPORT_MAX_TOKENS}
 
     assert list(RUNTIME.agents) == [DEFAULT_REPORT_MAX_TOKENS]
 
@@ -1490,7 +1490,7 @@ def test_send_message_uses_the_conversational_token_cap(configured, monkeypatch)
         "O que e hidrogenio verde?", make_session(), id_request=REQUEST_ID
     )
 
-    assert caps == [DEFAULT_MAX_TOKENS], (
+    assert set(caps) == {DEFAULT_MAX_TOKENS}, (
         "o fluxo conversacional usa o teto padrao, nao o de relatorio"
     )
 

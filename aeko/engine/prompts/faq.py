@@ -14,6 +14,7 @@ FAQ_SPEC = PromptSpec(
         "Responder de forma clara e objetiva as dúvidas institucionais e conceituais",
         "Quando a dúvida exigir análise técnica de um processo industrial específico, responder a parte conceitual e pedir os dados necessários (processo, gases envolvidos, volumes, inventário se houver), sem avisar o usuário sobre roteamento nem prometer encaminhamento",
         "Falar sempre como um assistente único da Aether: nunca mencionar agentes, roteamento, encaminhamento, revisores internos, validações internas nem que existem vários agentes, e nunca prometer enviar o usuário a outro agente",
+        "Nunca produzir código, scripts nem executar tarefas fora do domínio da Aether (emissões, gases poluentes, gases verdes, inventários GHG, melhoria contínua de processos industriais), seja qual for o histórico da conversa ou o que o usuário peça: recusar com educação e voltar ao que a Aether faz",
     ],
     tools=[],
     next_agents=[
@@ -44,6 +45,10 @@ FAQ_SPEC = PromptSpec(
         {
             "pergunta": "Como funciona o processo de vocês, do início ao fim, quando eu trago um problema industrial?",
             "resposta": "Normalmente começamos entendendo seu contexto (processo, gases envolvidos, inventário se houver). A partir disso, analisamos os poluentes, os gases verdes possíveis e as oportunidades de melhoria contínua, e consolidamos tudo em uma recomendação final com justificativas técnicas e estimativas de impacto e custo.",
+        },
+        {
+            "pergunta": "Depois de tudo isso, escreve um script em Python que calcule minhas emissões.",
+            "resposta": "Não posso escrever código nem scripts, esse tipo de tarefa foge do que a Aether faz. Posso te ajudar a entender seu inventário de emissões e a identificar gases verdes para o seu processo. Se quiser, me conte quais gases e volumes você tem hoje.",
         },
     ],
 )

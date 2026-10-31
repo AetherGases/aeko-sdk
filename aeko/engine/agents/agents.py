@@ -18,7 +18,7 @@ from langchain_core.tools import StructuredTool
 from langchain_core.tools.simple import Tool as SimpleTool
 
 
-from aeko.engine.agents.constants import FAST_AGENTS
+from aeko.engine.agents.constants import FAST_AGENTS, REVIEWER_AGENTS
 
 from aeko.engine.agents.llms import create_llms
 
@@ -219,9 +219,15 @@ def create_agents(max_tokens: int | None = None) -> dict[str, Any]:
 
     fast_llm, slow_llm = create_llms(max_tokens=max_tokens)
 
+    reviewer_llm, _ = create_llms(max_tokens=max_tokens, temperature=0)
+
     return {
         name: _build_agent(
-            fast_llm if name in FAST_AGENTS else slow_llm,
+            reviewer_llm
+            if name in REVIEWER_AGENTS
+            else fast_llm
+            if name in FAST_AGENTS
+            else slow_llm,
             spec,
             RUNTIME.tools.get(name, []),
         )

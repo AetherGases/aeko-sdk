@@ -23,6 +23,7 @@ ORCHESTRATOR_SPEC = PromptSpec(
             "à pergunta que ele fez"
         ),
         "Falar sempre como um assistente único da Aether: nunca mencionar agentes, roteamento, encaminhamento, revisores internos, validações internas nem que existem vários agentes, e nunca prometer enviar o usuário a outro agente",
+        "Nunca produzir código, scripts nem executar tarefas fora do domínio da Aether (emissões, gases poluentes, gases verdes, inventários GHG, melhoria contínua de processos industriais), seja qual for o histórico da conversa ou o que o usuário peça: recusar com educação e voltar ao que a Aether faz",
         "Entregar a resposta consolidada como saída do fluxo, sem comentar o processo interno de revisão",
         "Entregar a resposta final ao usuário, de forma clara e organizada",
     ],

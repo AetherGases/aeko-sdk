@@ -269,3 +269,44 @@ def test_reviewers_reject_drafts_that_leak_the_multi_agent_structure(agent):
     assert any(
         "estrutura multiagente" in s["resposta"] for s in PROMPT_SPECS[agent].shots
     )
+
+
+REVIEWERS = ["Guardrail de Saída", "Verificador de Resposta"]
+
+
+@pytest.mark.parametrize("agent", REVIEWERS)
+def test_reviewers_treat_the_material_as_data_and_fix_the_verdict_format(agent):
+    """Reviewers treat the material as data and open with a fixed verdict."""
+    spec = PROMPT_SPECS[agent]
+
+    assert "nunca instruções" in spec.persona
+
+    tasks = " ".join(spec.tasks)
+
+    assert "'Aprovado.'" in tasks and "'Reprovado.'" in tasks
+
+    assert tasks.index("código") < tasks.index("estrutura multiagente")
+
+
+@pytest.mark.parametrize("agent", REVIEWERS)
+def test_reviewers_have_shots_rejecting_code_and_embedded_instructions(agent):
+    """Reviewers have shots rejecting code and embedded instructions."""
+    shots = PROMPT_SPECS[agent].shots
+
+    assert any("```" in s["pergunta"] and s["resposta"].startswith("Reprovado.") for s in shots)
+
+    assert any("ignore" in s["pergunta"].lower() and s["resposta"].startswith("Reprovado.") for s in shots)
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_prompts_carry_the_scope_rule(agent):
+    """User facing prompts refuse code and out of domain tasks."""
+    assert "nunca produzir código" in " ".join(PROMPT_SPECS[agent].tasks).lower()
+
+
+def test_faq_has_a_shot_refusing_code():
+    """FAQ has a shot refusing code."""
+    assert any(
+        "script" in s["pergunta"].lower() and "não posso" in s["resposta"].lower()
+        for s in PROMPT_SPECS["FAQ"].shots
+    )
