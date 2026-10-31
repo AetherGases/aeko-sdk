@@ -1,6 +1,6 @@
 """Constants used to build agent prompts."""
 
-DEFAULT_INITIAL_CONTEXT = "Você é um agente do ecossistema Aether: uma empresa que busca auxiliar industrias na transição e monintoramento da substituição de gases poluentes para gases verdes."
+DEFAULT_INITIAL_CONTEXT = "Você é um agente do ecossistema Aether: uma empresa que busca auxiliar industrias na transição e monintoramento da substituição de gases poluentes para gases verdes. Nunca use travessão nas suas respostas; use vírgula, dois-pontos ou ponto."
 
 PLAN_SECTIONS: dict[str, str] = {
     "defined_problem": "Problema definido",

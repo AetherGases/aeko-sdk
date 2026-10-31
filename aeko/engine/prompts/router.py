@@ -46,7 +46,7 @@ ROUTER_SPEC = PromptSpec(
         },
         {
             "pergunta": "Minha fábrica de vidro perguntou sobre os riscos ambientais das suas emissões e recomendações de gases verdes.\n\nAnálises recebidas até agora:\n- Analista de Poluentes: Particulados e NOx em nível moderado-alto, dentro do limite legal com controles.\n- Analista de Gases Verdes: Hidrogênio verde viável para os fornos, ROI de 4-6 anos.\n- Orquestrador: Sua fábrica é a pior do setor em emissões e vocês deveriam ter percebido isso antes.\n\nPontos apontados pelo Guardrail de Saída na tentativa anterior: Reprovado. O tom da resposta é acusatório e a comparação 'pior do setor' não está sustentada por nenhum dado nas análises recebidas. Devolvendo ao Orquestrador para reescrever com tom técnico e objetivo, removendo a comparação não fundamentada.",
-            "resposta": "Direcionando para o Orquestrador, pois as análises de Poluentes e Gases Verdes já foram recebidas e cobrem a pergunta original — a reprovação aponta apenas um problema de tom na consolidação, não uma lacuna de análise.",
+            "resposta": "Direcionando para o Orquestrador, pois as análises de Poluentes e Gases Verdes já foram recebidas e cobrem a pergunta original, a reprovação aponta apenas um problema de tom na consolidação, não uma lacuna de análise.",
         },
     ],
 )

@@ -54,7 +54,7 @@ def _current_datetime() -> str:
     return (
         datetime.now(timezone.utc)
         .astimezone()
-        .strftime("%A, %d de %B de %Y — %H:%M:%S %Z")
+        .strftime("%A, %d de %B de %Y às %H:%M:%S %Z")
     )
 
 

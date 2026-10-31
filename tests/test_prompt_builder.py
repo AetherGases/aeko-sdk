@@ -23,6 +23,8 @@ from aeko.engine.prompts import (
 
 from aeko.engine.prompts.builder import build_prompt
 
+from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
+
 
 def _system_content(prompt_template: ChatPromptTemplate) -> str:
     """System content."""
@@ -221,3 +223,19 @@ def test_build_prompt_recomputes_temporal_context_on_each_render():
     second_stamp = _system_content(prompt_template).split("Data e hora atuais: ")[1]
 
     assert first_stamp != second_stamp
+
+
+@pytest.mark.parametrize("agent", list(PROMPT_SPECS))
+def test_no_prompt_contains_an_em_or_en_dash(agent):
+    """No agent sees a travessão in its system prompt or few-shot examples."""
+    messages = build_prompt(PROMPT_SPECS[agent]).format_messages(messages=[])
+
+    text = "\n".join(m.content for m in messages)
+
+    assert "\u2014" not in text
+    assert "\u2013" not in text
+
+
+def test_shared_context_forbids_the_travessao_in_words():
+    """Shared context forbids the travessao in words."""
+    assert "Nunca use travessão" in DEFAULT_INITIAL_CONTEXT
