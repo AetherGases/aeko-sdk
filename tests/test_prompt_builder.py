@@ -239,3 +239,33 @@ def test_no_prompt_contains_an_em_or_en_dash(agent):
 def test_shared_context_forbids_the_travessao_in_words():
     """Shared context forbids the travessao in words."""
     assert "Nunca use travessão" in DEFAULT_INITIAL_CONTEXT
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_shot_answers_never_name_the_multi_agent_structure(agent):
+    """The answers that reach the user never name an internal agent or a hand-off."""
+    for shot in PROMPT_SPECS[agent].shots:
+        answer = shot["resposta"].lower()
+
+        assert "encaminh" not in answer
+
+        for spec in PROMPT_SPECS.values():
+            assert spec.agent.lower() not in answer
+
+
+@pytest.mark.parametrize("agent", ["FAQ", "Orquestrador"])
+def test_user_facing_prompts_demand_a_single_assistant_voice(agent):
+    """User facing prompts demand a single assistant voice."""
+    text = " ".join(PROMPT_SPECS[agent].tasks)
+
+    assert "assistente único" in text
+
+
+@pytest.mark.parametrize("agent", ["Guardrail de Saída", "Verificador de Resposta"])
+def test_reviewers_reject_drafts_that_leak_the_multi_agent_structure(agent):
+    """Reviewers reject drafts that leak the multi agent structure."""
+    assert "estrutura multiagente" in " ".join(PROMPT_SPECS[agent].tasks)
+
+    assert any(
+        "estrutura multiagente" in s["resposta"] for s in PROMPT_SPECS[agent].shots
+    )

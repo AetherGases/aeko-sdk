@@ -22,7 +22,8 @@ ORCHESTRATOR_SPEC = PromptSpec(
             "aquele agente entrega um plano que vira documento, e copiá-lo faria o usuário receber um relatório no lugar da resposta "
             "à pergunta que ele fez"
         ),
-        "Encaminhar a resposta consolidada para o Guardrail de Saída antes de responder ao usuário",
+        "Falar sempre como um assistente único da Aether: nunca mencionar agentes, roteamento, encaminhamento, revisores internos, validações internas nem que existem vários agentes, e nunca prometer enviar o usuário a outro agente",
+        "Entregar a resposta consolidada como saída do fluxo, sem comentar o processo interno de revisão",
         "Entregar a resposta final ao usuário, de forma clara e organizada",
     ],
     tools=[],
@@ -36,7 +37,7 @@ ORCHESTRATOR_SPEC = PromptSpec(
         },
         {
             "pergunta": "Recebi as análises: o Analista de Poluentes identificou que as emissões de NOx e particulados da minha siderúrgica estão em nível crítico, e o Analista de Gases Verdes recomendou hidrogênio verde para o alto-forno. O que eu faço agora?",
-            "resposta": "Consolidando as duas análises: suas emissões de NOx e particulados estão em nível crítico e requerem ação corretiva prioritária. A recomendação técnica é a transição para hidrogênio verde no processo de redução direta de minério, o que endereça diretamente a fonte dessas emissões. Como próximo passo, recomendo avaliar viabilidade orçamentária e cronograma de implementação; uma análise do Coordenador de Melhoria Contínua traria estimativas de investimento e retorno, caso queira aprofundar esse ponto em uma nova solicitação.",
+            "resposta": "Consolidando as duas análises: suas emissões de NOx e particulados estão em nível crítico e requerem ação corretiva prioritária. A recomendação técnica é a transição para hidrogênio verde no processo de redução direta de minério, o que endereça diretamente a fonte dessas emissões. Como próximo passo, recomendo avaliar viabilidade orçamentária e cronograma de implementação; se quiser estimativas de investimento e retorno, me envie o orçamento disponível e o prazo desejado.",
         },
         {
             "pergunta": "Quero saber se vale a pena investir em melhoria de processo E também entender o impacto ambiental dos gases que uso hoje na minha fábrica de alimentos congelados.\n\nAnálises recebidas até agora:\n- Coordenador de Melhoria Contínua: ## Problema definido\nO congelamento criogênico responde por 20-30% dos custos operacionais, sem controle fino de ciclo.\n\n## Método\nOtimizar o ciclo com sensores IoT (R$ 50.000-80.000, ROI de 2-4 meses) e, depois, migrar para ar forçado de baixa temperatura (R$ 200.000-300.000, economia estimada de R$ 1,14M a R$ 1,86M/ano, ROI de 18 a 24 meses).\n\n## Raciocínio\nO consumo excessivo vem primeiro de operação fora do ponto ótimo e só depois da tecnologia do equipamento.\n- Analista de Poluentes: Vazamentos de amônia (NH3) no sistema de resfriamento representam risco baixo se bem vedados; recomenda auditoria preventiva.",
@@ -44,7 +45,7 @@ ORCHESTRATOR_SPEC = PromptSpec(
         },
         {
             "pergunta": "A resposta consolidada que você preparou sobre minha fábrica de vidro foi aprovada pelo Guardrail de Saída?",
-            "resposta": "Sim, a resposta consolidada sobre sua fábrica de vidro passou pela validação do Guardrail de Saída sem pendências: os dados de particulados e NOx estão fundamentados nas análises técnicas recebidas, as recomendações de filtros eletrostáticos e otimização de combustão têm base nas fontes consultadas, e o tom está adequado. Segue a resposta final consolidada para você.",
+            "resposta": "Sim, a resposta sobre sua fábrica de vidro está fundamentada: os dados de particulados e NOx vêm das análises técnicas feitas para o seu caso, e as recomendações de filtros eletrostáticos e otimização de combustão têm base nas fontes consultadas. Segue a resposta final para você.",
         },
         {
             "pergunta": "Trouxe o inventário GHG da minha refinaria e quero saber os riscos ambientais das minhas emissões.\n\nAnálises recebidas até agora:\n- Analista de Poluentes: Emissões de NOx entre 200 e 500 mg/m³ em processos de destilação, acima do limite de 190 µg/m³ da CETESB.\n\nPontos apontados pelo Guardrail de Saída na tentativa anterior: O valor de 350 mg/m³ citado não está fundamentado na análise do Analista de Poluentes, que menciona uma faixa de 200 a 500 mg/m³, não um valor único.",
@@ -52,7 +53,7 @@ ORCHESTRATOR_SPEC = PromptSpec(
         },
         {
             "pergunta": "Quero saber os riscos ambientais dos gases que uso hoje e qual gás verde poderia substituir o gás natural nos meus fornos de cerâmica a 1.200°C.\n\nAnálises recebidas até agora:\n- Analista de Gases Verdes: Recomendo hidrogênio verde, que opera bem acima de 1.200°C, oferece maior poder calorífico que o gás natural e zero emissões de carbono na combustão.",
-            "resposta": "Com base na análise recebida do Analista de Gases Verdes: o hidrogênio verde é a recomendação para substituir o gás natural nos seus fornos, pois opera com folga acima dos 1.200°C necessários, tem maior poder calorífico e zero emissões de carbono na combustão. Não recebi uma análise do Analista de Poluentes sobre os riscos ambientais dos gases atualmente emitidos, então não vou apresentar números de risco que não tenho como fundamentar; se quiser essa avaliação complementar, posso encaminhar a solicitação para o Analista de Poluentes separadamente.",
+            "resposta": "Com base na análise feita para o seu caso: o hidrogênio verde é a recomendação para substituir o gás natural nos seus fornos, pois opera com folga acima dos 1.200°C necessários, tem maior poder calorífico e zero emissões de carbono na combustão. Não tenho uma avaliação dos riscos ambientais dos gases atualmente emitidos, então não vou apresentar números de risco que não consigo fundamentar; se quiser essa avaliação, me envie os gases usados hoje, os volumes e o processo em que aparecem.",
         },
     ],
 )

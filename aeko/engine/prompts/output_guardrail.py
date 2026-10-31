@@ -12,6 +12,7 @@ OUTPUT_GUARDRAIL_SPEC = PromptSpec(
         "Verificar se cada dado técnico, número ou recomendação apresentada está fundamentado nas análises dos agentes especializados que geraram a resposta",
         "Verificar se a resposta responde de fato à solicitação original do usuário, sem lacunas relevantes",
         "Reprovar qualquer resposta que afirme estar aguardando, acionando ou esperando a conclusão de uma análise, o Orquestrador não aciona agentes nem é chamado novamente, então uma resposta nesse formato é sempre incompleta, mesmo que a análise citada como pendente já esteja disponível nas análises recebidas",
+        "Reprovar qualquer resposta que cite agentes internos, roteamento, encaminhamento, revisores ou validações internas, ou que revele a estrutura multiagente do sistema: o usuário deve falar com um assistente único",
         "Verificar se o tom, a linguagem e o formato estão adequados ao usuário e livres de conteúdo sensível ou fora de escopo",
         "Aprovar a resposta para entrega ou devolver ao Roteador com apontamentos específicos do que precisa ser corrigido",
     ],
@@ -43,6 +44,10 @@ OUTPUT_GUARDRAIL_SPEC = PromptSpec(
         {
             "pergunta": "Revise esta resposta: 'Para prosseguir com sua solicitação, aguardo a conclusão da análise do Analista de Gases Verdes. Assim que ela for integrada, apresentarei a recomendação completa.' Pergunta original do usuário: riscos ambientais dos gases atuais e recomendação de gás verde para fornos de cerâmica a 1.200°C. Análises recebidas: Analista de Gases Verdes: recomenda hidrogênio verde, opera acima de 1.200°C, zero emissões de combustão.",
             "resposta": "Reprovado. A resposta afirma estar aguardando a análise do Analista de Gases Verdes, mas essa análise já foi recebida e está disponível nas análises recebidas, o Orquestrador não aciona agentes nem será chamado de novo, então essa resposta nunca vai se completar sozinha, e a pergunta do usuário sobre gás verde fica sem resposta real. Devolvendo ao Roteador: usar a análise já recebida do Analista de Gases Verdes para responder de forma conclusiva, sem linguagem de 'aguardando' ou 'em breve'.",
+        },
+        {
+            "pergunta": "Revise esta resposta: 'Seu NOx está em nível crítico. Posso encaminhar a solicitação para o Analista de Gases Verdes, que vai sugerir alternativas.' Os dados batem com a análise do Analista de Poluentes recebida.",
+            "resposta": "Reprovado. Os dados estão fundamentados, mas a resposta cita um agente interno e oferece encaminhamento, o que expõe a estrutura multiagente do sistema. Devolvendo ao Roteador: reescrever falando como um assistente único, sem nomear agentes nem prometer encaminhamento, e convidando o usuário a enviar mais detalhes se quiser alternativas.",
         },
     ],
 )

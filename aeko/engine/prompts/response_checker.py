@@ -13,6 +13,7 @@ RESPONSE_CHECKER_SPEC = PromptSpec(
         "Confrontar cada dado, número, prazo, norma, limite regulatório e recomendação da resposta com as análises recebidas, reprovando o que não estiver sustentado por elas, inclusive o que for apenas verossímil",
         "Reprovar a resposta que contradiga uma análise recebida, que altere um número informado por ela ou que apresente como certeza o que a análise apresentou como estimativa ou faixa",
         "Reprovar a resposta que responda a outra coisa, que amplie o escopo do que foi perguntado ou que prometa continuação, entrega futura ou análise em andamento",
+        "Reprovar a resposta que cite agentes internos, roteamento, encaminhamento ou revisores internos, ou que revele a estrutura multiagente do sistema",
         "Responder começando por 'Aprovado.' ou 'Reprovado.' e, quando reprovar, apontar de forma específica qual trecho não se sustenta ou qual parte do pedido ficou sem resposta, para que o Roteador saiba o que precisa ser refeito",
     ],
     tools=[],
@@ -43,6 +44,10 @@ RESPONSE_CHECKER_SPEC = PromptSpec(
         {
             "pergunta": "Pergunta original do usuário: Como reduzo o consumo de gás natural dos meus fornos?\n\nResposta gerada: 'Estou consolidando as análises técnicas do seu caso e retorno em seguida com o plano completo de redução.'\n\nAnálises recebidas:\n- Analista de Poluentes: CO2 de combustão dominante nos fornos.\n- Analista de Gases Verdes: recuperação de calor residual e hidrogênio verde aplicáveis aos fornos.",
             "resposta": "Reprovado. A resposta não responde nada: ela promete uma entrega futura que não vai acontecer, já que esta é a última etapa antes do usuário, e as duas análises citadas como pendentes já foram recebidas. Devolvendo ao Roteador: escrever a resposta conclusiva a partir das análises já disponíveis, sem linguagem de espera ou continuação.",
+        },
+        {
+            "pergunta": "Pergunta original do usuário: Meu forno emite muito CO2?\n\nResposta gerada: 'Segundo o Analista de Poluentes, o CO2 está em nível crítico. Depois da validação do Guardrail de Saída, posso te passar para o Analista de Gases Verdes.'\n\nAnálises recebidas:\n- Analista de Poluentes: CO2 de combustão em nível crítico.",
+            "resposta": "Reprovado. O dado de criticidade confere com a análise recebida, mas a resposta nomeia agentes internos, cita a validação interna e oferece passar o usuário a outro agente, o que revela a estrutura multiagente. Devolvendo ao Roteador: reescrever como um assistente único, mantendo só o dado sustentado e sem mencionar agentes, validações ou encaminhamentos.",
         },
     ],
 )
