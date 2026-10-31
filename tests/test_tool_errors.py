@@ -26,6 +26,8 @@ from aeko.engine.agents.agents import _to_lc_tool
 
 from aeko.engine.runtime import RUNTIME
 
+from aeko.shared import Flow, processing
+
 
 from tests.conftest import FakeChatModel, agent_name_from
 
@@ -180,6 +182,33 @@ def test_a_multi_arg_tool_is_promoted_to_a_structured_tool():
     assert promoted.invoke({"role": "gestor", "usecase": "auditoria"}) == (
         "updated role=gestor usecase=auditoria"
     )
+
+
+def test_a_promoted_tool_keeps_its_writing_flag():
+    """A promoted tool keeps its metadata, so a writer is still staged."""
+    calls: list[str | None] = []
+
+    def record_profile(
+        role: str | None = None, usecase: str | None = None
+    ) -> str:
+        """Record the role the tool was really asked to save."""
+
+        calls.append(role)
+
+        return "updated"
+
+    tool = _profile_tool(record_profile)
+
+    tool.metadata = {"is_writing": True}
+
+    with processing(Flow.CONVERSATIONAL, "test") as run:
+        result = _to_lc_tool(tool).invoke({"role": "gestor", "usecase": "auditoria"})
+
+    assert result == {"staged": True}
+
+    assert calls == []
+
+    assert [intent.name for intent in run.pending_writes] == ["update_user_profile"]
 
 
 def test_a_multi_arg_tool_call_does_not_abort_the_turn(

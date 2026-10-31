@@ -56,7 +56,8 @@ def _as_structured_tool(tool: Any) -> Any:
     `args_schema` with several fields is attached. The consuming API registers
     tools that way (`update_user_profile` with `role` and `usecase`), so a
     normal model call raises `ToolException` and used to abort the request.
-    `StructuredTool` is the same function with the schema actually honoured.
+    `StructuredTool` is the same function with the schema actually honoured,
+    and keeps the metadata, so an "is_writing" flag still stages its calls.
 
     Args:
         tool: A LangChain tool, already unwrapped from `AekoTool`.
@@ -81,6 +82,7 @@ def _as_structured_tool(tool: Any) -> Any:
         description=tool.description,
         args_schema=tool.args_schema,
         return_direct=tool.return_direct,
+        metadata=tool.metadata,
     )
 
 
