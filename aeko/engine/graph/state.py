@@ -94,6 +94,10 @@ class AetherGraphState(MessagesState):
     response checker — so an answer written into "messages" by the first of them
     would already be delivered by the time the second rejected it. The draft
     lives here until the last reviewer approves it, and only then is promoted.
+
+    "personal_data" maps each placeholder the input guardrail put in the text
+    ("[CPF_1]") to the value it hid. It is never rendered into an agent message:
+    only the Consolidador reads it, to restore the delivered answer.
     """
 
     initial_question: str
@@ -125,6 +129,8 @@ class AetherGraphState(MessagesState):
     catalog_context: str
 
     staged_writes: list[dict]
+
+    personal_data: dict[str, str]
 
 
 def create_initial_state(
@@ -171,4 +177,5 @@ def create_initial_state(
         company_context=company_context,
         catalog_context=catalog_context,
         staged_writes=[],
+        personal_data={},
     )

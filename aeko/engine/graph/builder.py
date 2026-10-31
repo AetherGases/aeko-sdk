@@ -14,6 +14,7 @@ from aeko.engine.graph.constants import (
     CONSOLIDATOR,
     GUARD_RAIL_MAX_RETRIES,
     IMPROVEMENT_COORDINATOR,
+    INPUT_GUARDRAIL,
     INVENTORY_ENTRY_POINT,
     REPORT_FLOW_ANALYSTS,
     RESPONSE_CHECK_MAX_RETRIES,
@@ -198,6 +199,8 @@ def build_graph() -> StateGraph:
 
     graph = StateGraph(AetherGraphState)
 
+    graph.add_node(INPUT_GUARDRAIL, nodes.guardrail_entrada_node)
+
     graph.add_node("Roteador", nodes.roteador_node)
 
     graph.add_node("FAQ", nodes.faq_node)
@@ -222,10 +225,12 @@ def build_graph() -> StateGraph:
         START,
         _entry_router,
         {
-            "Roteador": "Roteador",
+            "Roteador": INPUT_GUARDRAIL,
             "Análista de inventários": "Análista de inventários",
         },
     )
+
+    graph.add_edge(INPUT_GUARDRAIL, "Roteador")
 
     graph.add_conditional_edges(
         "Roteador",
@@ -239,7 +244,7 @@ def build_graph() -> StateGraph:
         },
     )
 
-    graph.add_edge("FAQ", END)
+    graph.add_edge("FAQ", CONSOLIDATOR)
 
     graph.add_conditional_edges(
         "Análista de inventários",

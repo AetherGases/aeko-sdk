@@ -423,3 +423,69 @@ def test_the_chat_flow_still_reaches_the_orchestrator(run_graph):
     assert "Orquestrador" in llm.agents_called(), (
         "o desvio vale so para o fluxo de relatorio"
     )
+
+
+CPF = "529.982.247-25"
+
+
+def _echoing(flow):
+    """Make the Orquestrador echo the placeholder, as an agent that saw one would."""
+    return {**flow, "Orquestrador": "Seu CPF [CPF_1] foi analisado.\nNext agent: Guardrail de Saída"}
+
+
+def test_no_agent_receives_the_raw_cpf(run_graph):
+    """The question and the history reach every agent masked."""
+    _, llm = run_graph(
+        _echoing(FULL_FLOW),
+        question=f"Meu CPF e {CPF}",
+        history=f"Usuário: antes enviei 52998224725",
+    )
+
+    assert llm.calls
+
+    for agent, text in llm.calls:
+        assert "529" not in text, agent
+
+        assert "98224725" not in text, agent
+
+    assert "[CPF_1]" in llm.prompt_for("Roteador")
+
+
+def test_company_context_is_not_masked(run_graph):
+    """Company context is left alone."""
+    _, llm = run_graph(FULL_FLOW, company_context=f"Responsavel {CPF}")
+
+    assert CPF in llm.prompt_for("Roteador")
+
+
+def test_an_echoed_placeholder_is_delivered_restored_as_one_message(run_graph):
+    """The Orquestrador path delivers the real CPF, replacing the draft."""
+    result, _ = run_graph(_echoing(FULL_FLOW), question=f"Meu CPF e {CPF}")
+
+    [message] = result["messages"]
+
+    assert message.content.startswith(f"Seu CPF {CPF} foi analisado.")
+
+
+def test_an_echoed_placeholder_is_restored_on_the_faq_path(run_graph):
+    """The FAQ ends through the Consolidador, so it is restored too."""
+    result, _ = run_graph(
+        {
+            "Roteador": "Ok.\nNext agent: FAQ",
+            "FAQ": "Recebi o CPF [CPF_1].\nNext agent: Nenhum",
+        },
+        question=f"Meu CPF e {CPF}",
+    )
+
+    [message] = result["messages"]
+
+    assert message.content.startswith(f"Recebi o CPF {CPF}.")
+
+
+def test_retry_cap_endings_still_deliver_nothing_with_personal_data(run_graph):
+    """A turn that gave up delivers nothing, restored or not."""
+    result, _ = run_graph(
+        {**_echoing(REJECTING_FLOW)}, question=f"Meu CPF e {CPF}"
+    )
+
+    assert not result["messages"]

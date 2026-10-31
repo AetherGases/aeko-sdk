@@ -2,7 +2,7 @@
 
 import pytest
 
-from langgraph.graph import END
+from langgraph.graph import END, START
 
 
 from aeko.engine.graph import builder
@@ -396,3 +396,26 @@ def test_get_app_returns_an_invocable_graph():
     assert app is not None
 
     assert hasattr(app, "invoke")
+
+
+def test_the_conversational_entry_passes_through_the_input_guardrail():
+    """START leads to the input guardrail, which leads to the Roteador."""
+    graph = builder.build_graph()
+
+    ends = set()
+
+    for branch in graph.branches[START].values():
+        ends.update((branch.ends or {}).values())
+
+    assert ends == {"Guardrail de Entrada", "Análista de inventários"}
+
+    assert ("Guardrail de Entrada", "Roteador") in graph._all_edges
+
+
+def test_the_faq_ends_through_the_consolidador():
+    """The FAQ no longer goes straight to the end."""
+    edges = builder.build_graph()._all_edges
+
+    assert ("FAQ", builder.CONSOLIDATOR) in edges
+
+    assert ("FAQ", END) not in edges
