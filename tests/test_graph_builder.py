@@ -326,18 +326,21 @@ def test_the_report_flow_never_reaches_the_response_checker():
     assert builder.RESPONSE_CHECKER not in ends
 
 
-def test_route_from_coordinator_ends_the_report_flow():
+def test_route_from_coordinator_sends_the_report_flow_to_the_consolidador():
     """
     The coordinator is terminal for `analyze()`, and only for it.
 
     Its answer is read straight out of the run's last message and parsed into
-    an `AekoImprovementPlan`, so anything appended after it would be parsed in
-    its place.
+    an `AekoImprovementPlan`, so the only node left before the end is the one
+    that commits the staged writes without touching that message.
     """
 
     route = builder._route_from_coordinator
 
-    assert route(_state(), _config(builder.INVENTORY_ENTRY_POINT)) == END
+    assert (
+        route(_state(), _config(builder.INVENTORY_ENTRY_POINT))
+        == builder.CONSOLIDATOR
+    )
 
 
 @pytest.mark.parametrize("entry_point", [None, "Roteador"])
@@ -364,7 +367,7 @@ def test_the_coordinator_edge_carries_both_targets():
     for branch in graph.branches[builder.IMPROVEMENT_COORDINATOR].values():
         ends.update(branch.ends or {})
 
-    assert ends == {"Orquestrador", END}
+    assert ends == {"Orquestrador", builder.CONSOLIDATOR}
 
 
 def test_orquestrador_only_goes_to_guardrail():

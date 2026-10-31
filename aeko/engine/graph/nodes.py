@@ -659,7 +659,9 @@ def _verificador_resposta_node(
     return update
 
 
-def _consolidador_node(state: AetherGraphState) -> dict:
+def _consolidador_node(
+    state: AetherGraphState, config: RunnableConfig | None = None
+) -> dict:
     """
     Commit the writes the agents staged during an approved turn.
 
@@ -671,14 +673,17 @@ def _consolidador_node(state: AetherGraphState) -> dict:
 
     What still fails is reported through the run's error description, and the
     failed tool's "write_failure_message" sentence is appended to the answer.
-    Arguments are never part of either.
+    Arguments are never part of either. The report flow's result is parsed
+    into sections by its caller, so there a failure shows up only in the
+    metrics and the report is left exactly as the coordinator wrote it.
 
     Args:
         state: The current graph state, whose "output" holds the approved answer.
+        config: The run's configuration, carrying the "entry_point".
 
     Returns:
-        dict: The state update — empty when every write committed, otherwise the
-            answer with the failure sentence appended.
+        dict: The state update — empty when every write committed or in the
+            report flow, otherwise the answer with the failure sentence appended.
     """
 
     run = current_run()
@@ -707,6 +712,9 @@ def _consolidador_node(state: AetherGraphState) -> dict:
         return {}
 
     run.fail("Consolidador: " + "; ".join(f"{i.name}: {i.error}" for i in failed))
+
+    if _is_report_flow(config):
+        return {}
 
     tools = ", ".join(dict.fromkeys(intent.name for intent in failed))
 

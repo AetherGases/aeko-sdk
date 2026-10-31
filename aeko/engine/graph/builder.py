@@ -114,7 +114,9 @@ def _route_from_coordinator(state: AetherGraphState, config: RunnableConfig) -> 
     Decide whether the coordinator's plan ends the run or feeds the answer.
 
     The coordinator is terminal for `analyze()` and only for it: that flow
-    reads the plan straight out of the run's last message. A chat that asked
+    reads the plan straight out of the run's last message, so the only node
+    left between it and the end is the Consolidador, which commits the staged
+    writes without touching that message. A chat that asked
     for an improvement got the same plan delivered raw — the agent's fixed
     document sections, handed over without passing either reviewer, since this
     node used to end the run there too. In a chat it is a finding like any
@@ -125,11 +127,12 @@ def _route_from_coordinator(state: AetherGraphState, config: RunnableConfig) -> 
         config: The run's configuration, carrying the "entry_point".
 
     Returns:
-        str: END in the report flow, "Orquestrador" in the conversational one.
+        str: The Consolidador in the report flow, "Orquestrador" in the
+            conversational one.
     """
 
     if config.get("configurable", {}).get("entry_point") == INVENTORY_ENTRY_POINT:
-        return END
+        return CONSOLIDATOR
 
     return "Orquestrador"
 
@@ -273,7 +276,7 @@ def build_graph() -> StateGraph:
         _route_from_coordinator,
         {
             "Orquestrador": "Orquestrador",
-            END: END,
+            CONSOLIDATOR: CONSOLIDATOR,
         },
     )
 

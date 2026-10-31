@@ -32,8 +32,10 @@ from tests.conftest import FakeChatModel, agent_name_from
 from tests.test_graph_e2e import (
     CHECKER_REJECTING_FLOW,
     CONSOLIDATED_ANSWER,
+    CHAT_PLAN_FLOW,
     FULL_FLOW,
     INITIAL_QUESTION,
+    INVENTORY_FLOW,
     REJECTING_FLOW,
 )
 
@@ -150,7 +152,7 @@ def last_turn():
 def run_turn(monkeypatch, writes, last_turn):
     """Run the graph inside a bound run, returning the visited nodes and the model."""
 
-    def _run(responses, tool_caller="Roteador"):
+    def _run(responses, tool_caller="Roteador", entry_point="Roteador", flow=Flow.CONVERSATIONAL):
         """Run."""
 
         llm = ToolCallingChatModel(
@@ -165,11 +167,11 @@ def run_turn(monkeypatch, writes, last_turn):
 
         state = create_initial_state(INITIAL_QUESTION)
 
-        with processing(Flow.CONVERSATIONAL, "test") as run:
+        with processing(flow, "test") as run:
             updates = list(
                 get_app().stream(
                     state,
-                    config={"configurable": {"entry_point": "Roteador"}},
+                    config={"configurable": {"entry_point": entry_point}},
                     stream_mode="updates",
                 )
             )
@@ -306,6 +308,88 @@ def test_a_persistent_failure_does_not_stop_the_other_writes(
         last_turn["run"].event_tracking().error_description
         == "Consolidador: save_profile: boom"
     )
+
+
+COORDINATOR = "Coordenador de Melhoria Contínua"
+
+INVENTORY_ENTRY = "Análista de inventários"
+
+
+@pytest.fixture
+def run_report(run_turn, last_turn):
+    """Run the analytical flow, its coordinator calling the writing tool."""
+
+    def _run():
+        """Run."""
+
+        visited, _ = run_turn(
+            INVENTORY_FLOW,
+            tool_caller=COORDINATOR,
+            entry_point=INVENTORY_ENTRY,
+            flow=Flow.REPORT,
+        )
+
+        return visited
+
+    return _run
+
+
+def test_the_report_flow_commits_its_writes_after_the_coordinator(
+    register_writer, writes, run_report, last_turn
+):
+    """The report flow commits its writes after the coordinator, report untouched."""
+    register_writer(agent=COORDINATOR)
+
+    visited = run_report()
+
+    assert writes == ["gestor"]
+
+    assert visited[-2:] == [COORDINATOR, "Consolidador"]
+
+    assert last_turn["run"].event_tracking().error_description is None
+
+    assert last_turn["answer"] == INVENTORY_FLOW[COORDINATOR]
+
+
+def test_a_persistent_failure_in_the_report_flow_leaves_the_report_byte_identical(
+    register_writer, writes, run_report, last_turn
+):
+    """A persistent failure in the report flow is only in the metrics."""
+    register_writer(agent=COORDINATOR)
+
+    run_report()
+
+    report_without_failure = last_turn["answer"]
+
+    writes.clear()
+
+    register_writer(agent=COORDINATOR, fail_on={1, 2})
+
+    run_report()
+
+    assert writes == []
+
+    assert (
+        last_turn["run"].event_tracking().error_description
+        == "Consolidador: save_profile: boom"
+    )
+
+    assert last_turn["answer"] == report_without_failure
+
+    assert "Não consegui salvar" not in last_turn["answer"]
+
+
+def test_the_conversational_edge_of_the_coordinator_is_unchanged(
+    register_writer, writes, run_turn
+):
+    """In a chat the coordinator's plan still feeds the Orquestrador."""
+    register_writer(agent=COORDINATOR)
+
+    visited, _ = run_turn(CHAT_PLAN_FLOW, tool_caller=COORDINATOR)
+
+    assert visited.index("Orquestrador") > visited.index(COORDINATOR)
+
+    assert visited[-2:] == ["Verificador de Resposta", "Consolidador"]
 
 
 def test_a_writing_tool_called_outside_a_run_executes_immediately(
