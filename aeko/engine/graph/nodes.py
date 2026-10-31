@@ -2,7 +2,7 @@
 
 from functools import wraps
 
-from typing import Callable
+from typing import Any, Callable
 
 
 from langchain_core.messages import HumanMessage
@@ -707,7 +707,7 @@ def _consolidador_node(
                 continue
 
             try:
-                intent.tool.invoke(intent.args)
+                intent.tool.invoke(_unmask_args(intent.args, mapping))
 
             except Exception as error:
                 intent.status = "failed"
@@ -744,6 +744,21 @@ def _consolidador_node(
         message["id"] = last.id
 
     return {"messages": [message]}
+
+
+def _unmask_args(value: Any, mapping: dict[str, str]) -> Any:
+    """Return `value` with every string restored, recursing through dicts and lists."""
+
+    if isinstance(value, str):
+        return unmask(value, mapping)
+
+    if isinstance(value, dict):
+        return {key: _unmask_args(item, mapping) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [_unmask_args(item, mapping) for item in value]
+
+    return value
 
 
 def _is_report_flow(config: RunnableConfig | None) -> bool:

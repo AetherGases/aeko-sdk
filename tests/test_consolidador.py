@@ -569,3 +569,47 @@ def test_an_empty_mapping_changes_nothing():
     from aeko.engine.graph.nodes import consolidador_node
 
     assert consolidador_node({"messages": [], "output": "x", "personal_data": {}}) == {}
+
+
+def _commit_with(args, mapping):
+    """Commit one staged write with `args` and return what the real tool got."""
+    from aeko.engine.agents.writes import WriteIntent
+    from aeko.engine.graph.nodes import consolidador_node
+
+    received = []
+
+    def save_profile(phone: str = "", extra: dict | None = None, n: int = 0) -> str:
+        """Save."""
+
+        received.append(
+            {k: v for k, v in dict(phone=phone, extra=extra, n=n).items() if k in args}
+        )
+
+        return "saved"
+
+    tool = StructuredTool.from_function(func=save_profile)
+
+    with processing(Flow.CONVERSATIONAL, "test") as run:
+        run.pending_writes.append(WriteIntent("save_profile", tool, args))
+
+        consolidador_node({"messages": [], "output": "x", "personal_data": mapping})
+
+    return received
+
+
+def test_a_staged_write_is_committed_with_the_real_personal_data_even_nested():
+    """Placeholders in staged arguments are restored, recursively."""
+    args = {"phone": "[PHONE_1]", "extra": {"list": ["[PHONE_1]", 3]}, "n": 7}
+
+    received = _commit_with(args, {"[PHONE_1]": "11 91234-5678"})
+
+    assert received == [
+        {"phone": "11 91234-5678", "extra": {"list": ["11 91234-5678", 3]}, "n": 7}
+    ]
+
+    assert args["phone"] == "[PHONE_1]"
+
+
+def test_staged_arguments_pass_unchanged_with_an_empty_mapping():
+    """Without personal data the arguments are committed as staged."""
+    assert _commit_with({"phone": "[PHONE_1]"}, {}) == [{"phone": "[PHONE_1]"}]
