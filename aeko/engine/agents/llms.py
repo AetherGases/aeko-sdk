@@ -8,7 +8,7 @@ from aeko.engine.runtime import RUNTIME
 from aeko.engine.constants import DEFAULT_TEMPERATURE, DEFAULT_TOP_K, DEFAULT_TOP_P
 
 
-def create_llms(max_tokens: int | None = None):
+def create_llms(max_tokens: int | None = None, temperature: float | None = None):
     """
     Create the fast and slow chat models used across the agent system.
 
@@ -22,6 +22,8 @@ def create_llms(max_tokens: int | None = None):
         max_tokens: Output token cap for both models. Defaults to the
             configured conversational cap, which is how the inventory report
             flow asks for more room than a chat answer.
+        temperature: Sampling temperature for both models. Defaults to the
+            configured one; the reviewers ask for 0.
 
     Returns:
         tuple[BaseChatModel, BaseChatModel]: The fast LLM (with the slow LLM as
@@ -39,9 +41,12 @@ def create_llms(max_tokens: int | None = None):
 
     max_tokens = max_tokens or RUNTIME.max_tokens
 
+    if temperature is None:
+        temperature = RUNTIME.temperature
+
     fast_llm = ChatGoogleGenerativeAI(
         model=fast_model,
-        temperature=RUNTIME.temperature,
+        temperature=temperature,
         top_p=RUNTIME.top_p,
         top_k=RUNTIME.top_k,
         max_tokens=max_tokens,
@@ -50,7 +55,7 @@ def create_llms(max_tokens: int | None = None):
 
     slow_llm = ChatGoogleGenerativeAI(
         model=slow_model,
-        temperature=RUNTIME.temperature,
+        temperature=temperature,
         top_p=RUNTIME.top_p,
         top_k=RUNTIME.top_k,
         max_tokens=max_tokens,
