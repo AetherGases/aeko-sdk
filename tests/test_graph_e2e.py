@@ -489,3 +489,26 @@ def test_retry_cap_endings_still_deliver_nothing_with_personal_data(run_graph):
     )
 
     assert not result["messages"]
+
+
+def test_cnpj_card_and_phone_reach_agents_masked_and_come_back_restored(run_graph):
+    """All four personal data types are placeholders for agents and real in the answer."""
+    values = ["529.982.247-25", "11.222.333/0001-81", "4111 1111 1111 1111", "(11) 91234-5678"]
+
+    result, llm = run_graph(
+        {
+            "Roteador": "Ok.\nNext agent: FAQ",
+            "FAQ": "Recebi [CPF_1], [CNPJ_1], [CARTAO_1] e [TELEFONE_1].\nNext agent: Nenhum",
+        },
+        question="Meus dados: " + ", ".join(values),
+    )
+
+    for agent, text in llm.calls:
+        for value in values:
+            assert value not in text, agent
+
+    assert "[CNPJ_1]" in llm.prompt_for("Roteador")
+
+    [message] = result["messages"]
+
+    assert message.content.startswith("Recebi " + ", ".join(values[:3]) + " e " + values[3] + ".")

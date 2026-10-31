@@ -46,3 +46,37 @@ def test_unmask_restores_known_placeholders_and_leaves_unknown_ones():
     assert unmask("cpf [CPF_1] e [CPF_9]", mapping) == "cpf 529.982.247-25 e [CPF_9]"
 
     assert unmask("cpf [CPF_1]", {}) == "cpf [CPF_1]"
+
+
+@pytest.mark.parametrize(
+    "text, masked",
+    [
+        ("cnpj 11.222.333/0001-81 ok", "cnpj [CNPJ_1] ok"),
+        ("cnpj 11222333000181 ok", "cnpj [CNPJ_1] ok"),
+        ("cnpj 11.222.333/0001-82 ok", "cnpj 11.222.333/0001-82 ok"),
+        ("cartao 4111 1111 1111 1111 ok", "cartao [CARTAO_1] ok"),
+        ("cartao 4111-1111-1111-1111 ok", "cartao [CARTAO_1] ok"),
+        ("cartao 4111111111111111 ok", "cartao [CARTAO_1] ok"),
+        ("cartao 4111 1111 1111 1112 ok", "cartao 4111 1111 1111 1112 ok"),
+        ("tel (11) 91234-5678 ok", "tel [TELEFONE_1] ok"),
+        ("tel (11) 3456-7890 ok", "tel [TELEFONE_1] ok"),
+        ("tel +55 11 91234-5678 ok", "tel [TELEFONE_1] ok"),
+        ("tel 11 91234-5678 ok", "tel [TELEFONE_1] ok"),
+        ("tel 11 3456-7890 ok", "tel [TELEFONE_1] ok"),
+        ("tel 11912345678 ok", "tel 11912345678 ok"),
+        ("tel 1134567890 ok", "tel 1134567890 ok"),
+        ("emitiu 2.350 tCO2e e 1.550 e R$ 200.000 a 1.200 graus", "emitiu 2.350 tCO2e e 1.550 e R$ 200.000 a 1.200 graus"),
+    ],
+)
+def test_mask_cnpj_card_and_phone(text, masked):
+    """Check digits, Luhn and a recognizable area code gate the new detectors."""
+    assert mask(text, {})[0] == masked
+
+
+def test_overlaps_go_longest_first_and_a_masked_span_is_not_rematched():
+    """A card is not read as a phone and a token's digits are left alone."""
+    text, mapping = mask("4111111111111111 11.222.333/0001-81 529.982.247-25 (11) 91234-5678", {})
+
+    assert text == "[CARTAO_1] [CNPJ_1] [CPF_1] [TELEFONE_1]"
+
+    assert mask(text, mapping)[0] == text

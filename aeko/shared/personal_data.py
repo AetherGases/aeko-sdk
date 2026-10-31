@@ -30,8 +30,47 @@ def _valid_cpf(value: str) -> bool:
     return True
 
 
+def _valid_cnpj(value: str) -> bool:
+    """Say whether a CNPJ has two valid check digits and is not a repeated digit."""
+
+    digits = _digits(value)
+
+    if len(set(digits)) == 1:
+        return False
+
+    for size in (12, 13):
+        weights = [*range(size - 7, 1, -1), *range(9, 1, -1)]
+
+        rest = sum(int(d) * w for d, w in zip(digits, weights)) % 11
+
+        if int(digits[size]) != (0 if rest < 2 else 11 - rest):
+            return False
+
+    return True
+
+
+def _luhn(value: str) -> bool:
+    """Say whether a 13 to 19 digit number passes the Luhn check."""
+
+    digits = [int(d) for d in _digits(value)]
+
+    if not 13 <= len(digits) <= 19:
+        return False
+
+    total = sum(d if i % 2 == 0 else sum(divmod(d * 2, 10)) for i, d in enumerate(reversed(digits)))
+
+    return total % 10 == 0
+
+
 DETECTORS = [
+    ("CNPJ", re.compile(r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}(?!\d)"), _valid_cnpj),
+    ("CARTAO", re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)"), _luhn),
     ("CPF", re.compile(r"(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)"), _valid_cpf),
+    (
+        "TELEFONE",
+        re.compile(r"(?<![\d-])(?:(?:\+55\s?\d{2}\s?|\(\d{2}\)\s?)9?\d{4}-?\d{4}|\d{2}\s9?\d{4}-\d{4})(?!\d)"),
+        lambda value: True,
+    ),
 ]
 
 
