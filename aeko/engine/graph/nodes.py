@@ -1,5 +1,7 @@
 """Graph node functions for the conversational and inventory report flows."""
 
+from functools import wraps
+
 from typing import Callable
 
 
@@ -7,6 +9,8 @@ from langchain_core.messages import HumanMessage
 
 from langchain_core.runnables import RunnableConfig
 
+
+from aeko.engine.agents.writes import is_writing
 
 from aeko.engine.graph.constants import (
     INVENTORY_ENTRY_POINT,
@@ -53,6 +57,39 @@ def _format_findings(previous_agents: dict[str, str]) -> str:
     """
 
     return "\n".join(f"- {name}: {output}" for name, output in previous_agents.items())
+
+
+def _staged_writes_section(state: AetherGraphState) -> list[str]:
+    """
+    Render the writes this run already staged, so no agent stages them twice.
+
+    Args:
+        state: The current graph state.
+
+    Returns:
+        list[str]: The section as a one-item list, empty when nothing is staged,
+            ready to extend a message's parts.
+    """
+
+    staged = state.get("staged_writes") or []
+
+    if not staged:
+        return []
+
+    lines = "\n".join(
+        f"- {write['name']}({write['args']}) [{write['status']}]" for write in staged
+    )
+
+    return [f"Escritas já registradas nesta execução (aguardam a aprovação):\n{lines}"]
+
+
+def _owns_writing_tool(agent_name: str) -> bool:
+    """Tell whether any tool registered for an agent is flagged writing."""
+
+    return any(
+        is_writing(getattr(tool, "tool", tool))
+        for tool in RUNTIME.tools.get(agent_name, [])
+    )
 
 
 def _build_context_message(state: AetherGraphState) -> HumanMessage:
@@ -111,6 +148,8 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     if previous:
         parts.append(f"Análises recebidas até agora:\n{_format_findings(previous)}")
 
+    parts.extend(_staged_writes_section(state))
+
     requested_changes = state.get("guard_rail_requested_changes") or []
 
     if requested_changes:
@@ -165,6 +204,9 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     if findings:
         parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
 
+    if _owns_writing_tool("Guardrail de Saída"):
+        parts.extend(_staged_writes_section(state))
+
     return HumanMessage(content="\n\n".join(parts))
 
 
@@ -207,6 +249,9 @@ def _build_response_check_message(state: AetherGraphState) -> HumanMessage:
 
     if findings:
         parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
+
+    if _owns_writing_tool(RESPONSE_CHECKER):
+        parts.extend(_staged_writes_section(state))
 
     return HumanMessage(content="\n\n".join(parts))
 
@@ -319,6 +364,37 @@ def _invoke_agent(
     return output, next_agent
 
 
+def _recording_staged_writes(node: Callable) -> Callable:
+    """
+    Wrap an agent node so its update carries the writes staged so far.
+
+    The intents live on the run handle, which is shared with the tools running
+    in copied contexts; the state only gets a snapshot, which is what the next
+    handoff is built from.
+
+    Args:
+        node: A graph node function that invokes an agent.
+
+    Returns:
+        Callable: The same node, whose update also sets "staged_writes".
+    """
+
+    @wraps(node)
+    def wrapper(*args, **kwargs) -> dict:
+        """Run the node and snapshot the run's staged writes."""
+
+        run = current_run()
+
+        staged = [
+            {"name": write.name, "args": write.args, "status": write.status}
+            for write in (run.pending_writes if run else [])
+        ]
+
+        return {**node(*args, **kwargs), "staged_writes": staged}
+
+    return wrapper
+
+
 def _specialist_node_factory(
     agent_name: str, *, terminal: bool = False
 ) -> Callable[[AetherGraphState], dict]:
@@ -342,6 +418,7 @@ def _specialist_node_factory(
         Callable[[AetherGraphState], dict]: A graph node function.
     """
 
+    @_recording_staged_writes
     def node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
         """Run the specialist and record its findings on the graph state."""
 
@@ -386,6 +463,7 @@ def _non_specialist_node_factory(
         Callable[[AetherGraphState], dict]: A graph node function.
     """
 
+    @_recording_staged_writes
     def node(state: AetherGraphState, config: RunnableConfig | None = None) -> dict:
         """Run the non-specialist and optionally deliver its output."""
 
@@ -733,15 +811,15 @@ def _coordenador_melhoria_node(
     return update
 
 
-roteador_node = _roteador_node
+roteador_node = _recording_staged_writes(_roteador_node)
 
 faq_node = _non_specialist_node_factory("FAQ", terminal=True)
 
-orquestrador_node = _orquestrador_node
+orquestrador_node = _recording_staged_writes(_orquestrador_node)
 
-guardrail_node = _guardrail_node
+guardrail_node = _recording_staged_writes(_guardrail_node)
 
-verificador_resposta_node = _verificador_resposta_node
+verificador_resposta_node = _recording_staged_writes(_verificador_resposta_node)
 
 consolidador_node = _consolidador_node
 
@@ -752,4 +830,4 @@ analista_poluentes_node = _specialist_node_factory("Analista de Poluentes")
 
 analista_gases_verdes_node = _specialist_node_factory("Analista de Gases Verdes")
 
-coordenador_melhoria_node = _coordenador_melhoria_node
+coordenador_melhoria_node = _recording_staged_writes(_coordenador_melhoria_node)

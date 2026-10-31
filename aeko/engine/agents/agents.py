@@ -22,7 +22,7 @@ from aeko.engine.agents.constants import FAST_AGENTS
 
 from aeko.engine.agents.llms import create_llms
 
-from aeko.engine.agents.writes import stage_writes
+from aeko.engine.agents.writes import is_writing, stage_writes
 
 from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
 
@@ -172,11 +172,15 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Any:
         AgentExecutor: An agent executor ready to be invoked.
     """
 
-    prompt = build_prompt(
-        replace(spec, tools=[_to_prompt_line(tool) for tool in tools])
-    )
-
     lc_tools = [_to_lc_tool(tool) for tool in tools]
+
+    prompt = build_prompt(
+        replace(
+            spec,
+            tools=[_to_prompt_line(tool) for tool in tools],
+            has_writing_tools=any(is_writing(tool) for tool in lc_tools),
+        )
+    )
 
     system_message = prompt.invoke({"messages": []}).messages[0]
 

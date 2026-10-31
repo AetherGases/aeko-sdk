@@ -124,6 +124,8 @@ class AetherGraphState(MessagesState):
 
     catalog_context: str
 
+    staged_writes: list[dict]
+
 
 def create_initial_state(
     initial_question: str,
@@ -168,4 +170,5 @@ def create_initial_state(
         response_check_approved=False,
         company_context=company_context,
         catalog_context=catalog_context,
+        staged_writes=[],
     )

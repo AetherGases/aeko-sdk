@@ -7,3 +7,10 @@ PLAN_SECTIONS: dict[str, str] = {
     "method": "Método",
     "reasoning": "Raciocínio",
 }
+
+STAGED_WRITES_INSTRUCTIONS = (
+    'Quando uma ferramenta de escrita responde {"staged": true}, a escrita foi apenas '
+    "registrada: ela só é salva se a resposta final for aprovada. Não chame essa "
+    "ferramenta de novo com os mesmos argumentos e não diga ao usuário que a "
+    "informação já está salva."
+)
