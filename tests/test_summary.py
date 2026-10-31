@@ -101,7 +101,7 @@ def summary_messenger(configured, use_fake_llm):
 
 def test_the_sdk_version_is_3_6_2():
     """The sdk version is 3 6 2."""
-    assert aeko.__version__ == "3.6.2"
+    assert aeko.__version__ == "3.7.0"
 
 
 def test_aeko_summary_response_is_exported():

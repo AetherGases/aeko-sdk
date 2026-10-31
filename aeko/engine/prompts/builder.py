@@ -16,7 +16,10 @@ from langchain_core.prompts import (
 from langchain_core.prompts.chat import MessagesPlaceholder
 
 
-from aeko.engine.prompts.constants import DEFAULT_INITIAL_CONTEXT
+from aeko.engine.prompts.constants import (
+    DEFAULT_INITIAL_CONTEXT,
+    STAGED_WRITES_INSTRUCTIONS,
+)
 
 
 @dataclass
@@ -36,6 +39,8 @@ class PromptSpec:
     shots: list[Dict[str, str]] = field(default_factory=list)
 
     initial_context: str = DEFAULT_INITIAL_CONTEXT
+
+    has_writing_tools: bool = False
 
 
 def _current_datetime() -> str:
@@ -93,6 +98,9 @@ def _render_instructions(prompt: PromptSpec) -> str:
         ),
     ]
 
+    if prompt.has_writing_tools:
+        sections.append(("# Escritas Pendentes", STAGED_WRITES_INSTRUCTIONS))
+
     rendered_sections = []
 
     for title, content in sections:
@@ -114,7 +122,7 @@ def build_prompt(prompt: PromptSpec | None = None, **kwargs) -> ChatPromptTempla
         prompt: A ready-made PromptSpec instance. Mutually exclusive with
             passing spec fields as keyword arguments.
         **kwargs: PromptSpec fields (agent, scope, persona, tasks, tools,
-            next_agents, shots, initial_context) used to build a PromptSpec when
+            next_agents, shots, initial_context, has_writing_tools) used to build a PromptSpec when
             `prompt` is not given.
 
     Returns:

@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from aeko.engine.graph import nodes
 
 from aeko.engine.graph.constants import (
+    CONSOLIDATOR,
     GUARD_RAIL_MAX_RETRIES,
     IMPROVEMENT_COORDINATOR,
     INVENTORY_ENTRY_POINT,
@@ -113,7 +114,9 @@ def _route_from_coordinator(state: AetherGraphState, config: RunnableConfig) -> 
     Decide whether the coordinator's plan ends the run or feeds the answer.
 
     The coordinator is terminal for `analyze()` and only for it: that flow
-    reads the plan straight out of the run's last message. A chat that asked
+    reads the plan straight out of the run's last message, so the only node
+    left between it and the end is the Consolidador, which commits the staged
+    writes without touching that message. A chat that asked
     for an improvement got the same plan delivered raw — the agent's fixed
     document sections, handed over without passing either reviewer, since this
     node used to end the run there too. In a chat it is a finding like any
@@ -124,11 +127,12 @@ def _route_from_coordinator(state: AetherGraphState, config: RunnableConfig) -> 
         config: The run's configuration, carrying the "entry_point".
 
     Returns:
-        str: END in the report flow, "Orquestrador" in the conversational one.
+        str: The Consolidador in the report flow, "Orquestrador" in the
+            conversational one.
     """
 
     if config.get("configurable", {}).get("entry_point") == INVENTORY_ENTRY_POINT:
-        return END
+        return CONSOLIDATOR
 
     return "Orquestrador"
 
@@ -175,10 +179,10 @@ def _route_from_response_check(state: AetherGraphState) -> str:
             "Roteador".
     """
 
-    if (
-        state["response_check_approved"]
-        or state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES
-    ):
+    if state["response_check_approved"]:
+        return CONSOLIDATOR
+
+    if state["response_check_retries"] >= RESPONSE_CHECK_MAX_RETRIES:
         return END
 
     return "Roteador"
@@ -203,6 +207,8 @@ def build_graph() -> StateGraph:
     graph.add_node("Guardrail de Saída", nodes.guardrail_node)
 
     graph.add_node(RESPONSE_CHECKER, nodes.verificador_resposta_node)
+
+    graph.add_node(CONSOLIDATOR, nodes.consolidador_node)
 
     graph.add_node("Análista de inventários", nodes.analista_inventarios_node)
 
@@ -270,7 +276,7 @@ def build_graph() -> StateGraph:
         _route_from_coordinator,
         {
             "Orquestrador": "Orquestrador",
-            END: END,
+            CONSOLIDATOR: CONSOLIDATOR,
         },
     )
 
@@ -291,9 +297,12 @@ def build_graph() -> StateGraph:
         _route_from_response_check,
         {
             "Roteador": "Roteador",
+            CONSOLIDATOR: CONSOLIDATOR,
             END: END,
         },
     )
+
+    graph.add_edge(CONSOLIDATOR, END)
 
     return graph
 

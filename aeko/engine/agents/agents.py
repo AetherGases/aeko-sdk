@@ -22,6 +22,8 @@ from aeko.engine.agents.constants import FAST_AGENTS
 
 from aeko.engine.agents.llms import create_llms
 
+from aeko.engine.agents.writes import is_writing, stage_writes
+
 from aeko.engine.prompts import PROMPT_SPECS, PromptSpec, build_prompt
 
 from aeko.engine.runtime import RUNTIME
@@ -54,7 +56,8 @@ def _as_structured_tool(tool: Any) -> Any:
     `args_schema` with several fields is attached. The consuming API registers
     tools that way (`update_user_profile` with `role` and `usecase`), so a
     normal model call raises `ToolException` and used to abort the request.
-    `StructuredTool` is the same function with the schema actually honoured.
+    `StructuredTool` is the same function with the schema actually honoured,
+    and keeps the metadata, so an "is_writing" flag still stages its calls.
 
     Args:
         tool: A LangChain tool, already unwrapped from `AekoTool`.
@@ -79,6 +82,7 @@ def _as_structured_tool(tool: Any) -> Any:
         description=tool.description,
         args_schema=tool.args_schema,
         return_direct=tool.return_direct,
+        metadata=tool.metadata,
     )
 
 
@@ -122,7 +126,7 @@ def _to_lc_tool(tool: Any) -> Any:
         Any: The tool object to bind to the agent executor.
     """
 
-    return _as_structured_tool(getattr(tool, "tool", tool))
+    return stage_writes(_as_structured_tool(getattr(tool, "tool", tool)))
 
 
 class _AgentCompatibilityWrapper:
@@ -170,11 +174,15 @@ def _build_agent(llm: BaseChatModel, spec: PromptSpec, tools: list[Any]) -> Any:
         AgentExecutor: An agent executor ready to be invoked.
     """
 
-    prompt = build_prompt(
-        replace(spec, tools=[_to_prompt_line(tool) for tool in tools])
-    )
-
     lc_tools = [_to_lc_tool(tool) for tool in tools]
+
+    prompt = build_prompt(
+        replace(
+            spec,
+            tools=[_to_prompt_line(tool) for tool in tools],
+            has_writing_tools=any(is_writing(tool) for tool in lc_tools),
+        )
+    )
 
     system_message = prompt.invoke({"messages": []}).messages[0]
 

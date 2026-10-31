@@ -121,6 +121,14 @@ turn back at most `GUARD_RAIL_MAX_RETRIES` / `RESPONSE_CHECK_MAX_RETRIES`
 Report flow: enters at `INVENTORY_ENTRY_POINT`, never reaches the reviewers,
 ends at `Coordenador de Melhoria Contínua`.
 
+Writing tools (`metadata["is_writing"] is True`) do not write mid-run: inside a
+bound run each call is staged on `Processing.pending_writes` and answers
+`{"staged": true}`. `Consolidador` (`CONSOLIDATOR`) commits them, and only
+after an approved `Verificador de Resposta` or the report flow's coordinator.
+Retry-cap and FAQ endings never commit. A write that still fails after one
+retry sets the run's error description; in chat it also appends the tool's
+`metadata["write_failure_message"]` to the answer. The report is never altered.
+
 Plan format retries (`PLAN_FORMAT_MAX_RETRIES = 4`) happen **inside the
 coordinator node** and only re-ask that agent.
 

@@ -1,6 +1,6 @@
 """Aeko SDK - the Aether multi-agent core."""
 
-__version__ = "3.6.2"
+__version__ = "3.7.0"
 
 
 from aeko.config import (
