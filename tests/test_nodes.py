@@ -753,7 +753,9 @@ def test_guardrail_node_approves_without_delivering_the_draft(use_agents):
 
     assert result["guard_rail_approved"] is True
 
-    assert "guard_rail_requested_changes" not in result
+    assert result["guard_rail_requested_changes"] == [], (
+        "uma reprovação antiga do guardrail desviaria o Roteador na retentativa do Verificador"
+    )
 
     assert "guard_rail_retries" not in result
 
@@ -786,11 +788,18 @@ def test_guardrail_node_rejects_code_and_agent_names_without_the_model(
     assert result["guard_rail_retries"] == 1
 
 
-def test_guardrail_node_ignores_the_routing_marker(use_agents):
-    """The draft's own "Next agent: Guardrail de Saída" line is protocol, not a leak."""
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "CO2 em nível crítico.\nNext agent: Guardrail de Saída",
+        "Veja o FAQ do site para os prazos de envio do inventário.",
+    ],
+)
+def test_guardrail_node_leaves_protocol_and_faq_to_the_model(use_agents, draft):
+    """The routing marker is protocol and "FAQ" is a common word, not leaks."""
     use_agents({"Guardrail de Saída": _FakeAgent("Aprovado.\nNext agent: Nenhum")})
 
-    state = _state_with(output="CO2 em nível crítico.\nNext agent: Guardrail de Saída")
+    state = _state_with(output=draft)
 
     assert nodes._guardrail_node(state)["guard_rail_approved"] is True
 

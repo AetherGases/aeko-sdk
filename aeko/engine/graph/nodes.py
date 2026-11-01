@@ -34,7 +34,7 @@ from aeko.shared.text import next_agent_name, strip_routing_marker
 
 
 _LEAKED_AGENT = re.compile(
-    "|".join(rf"\b{re.escape(name)}\b" for name in AGENT_NAMES)
+    "|".join(rf"\b{re.escape(name)}\b" for name in AGENT_NAMES if name != "FAQ")
 )
 
 
@@ -626,7 +626,10 @@ def _guardrail_node(
 
     update = {"next_agent": next_agent, "guard_rail_approved": approved}
 
-    if not approved:
+    if approved:
+        update["guard_rail_requested_changes"] = []
+
+    else:
         update["guard_rail_requested_changes"] = [output]
 
         update["guard_rail_retries"] = state["guard_rail_retries"] + 1

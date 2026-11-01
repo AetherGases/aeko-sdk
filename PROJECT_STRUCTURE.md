@@ -127,6 +127,21 @@ dash. Each reviewer may send the
 turn back at most `GUARD_RAIL_MAX_RETRIES` / `RESPONSE_CHECK_MAX_RETRIES`
 (2) times. Exhaustion → `MalformedAgentOutputError`, no empty `output`.
 
+The two reviewers split by what they need to decide:
+
+- `Guardrail de Saída` is a **policy filter**: domain and code, internal
+  leaks, injected instructions, sensitive data, tone and risky advice. It gets
+  the draft and the question only, never the analyses. A draft with a code
+  fence or an `AGENT_NAMES` name (except `FAQ`) is rejected by `nodes.py`
+  before the model is called, so that rejection has no `agent_call`. Its
+  rejections send the `Roteador` back to the `Orquestrador`; an approval
+  clears its earlier feedback.
+- `Verificador de Resposta` is the **quality judge**: the whole question is
+  answered, and nothing contradicts the analyses, the question or recognized
+  references. Question data, derived arithmetic, technical constants and
+  public references count as supported. Its rejections are where the
+  `Roteador` looks for a missing specialist analysis.
+
 Report flow: enters at `INVENTORY_ENTRY_POINT`, never reaches the reviewers,
 ends at `Coordenador de Melhoria Contínua`.
 
