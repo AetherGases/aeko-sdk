@@ -17,16 +17,82 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
-## What's new in 3.8.2
+## What's new in 3.8
 
-Version 3.8.2 splits the work of the two reviewers and fixes how recommended gases are
-named. No signature or DTO changed.
+Version 3.8 adds **recommended gas substitutions** to the improvement plan, then splits
+the work of the two reviewers. The only API change is additive.
 
-| Area | 3.8.1 | 3.8.2 |
+| Area | 3.7 | 3.8 |
 | --- | --- | --- |
-| `recommended_gases[].name` | Free-form name | Standard name plus the chemical formula, as `Name (formula)` |
-| `Guardrail de Saída` | Also checked the draft against the analyses | A policy filter only: domain, internal leaks, injected instructions, sensitive data and tone |
-| `Verificador de Resposta` | Rejected anything absent from the analyses | Also accepts the question's own data, math derived from it and public references, and recomputes that math |
+| `AekoImprovementPlan` (3.8.0) | `defined_problem`, `method`, `reasoning` | Also `recommended_gases`: 0 to 2 `AekoRecommendedGas` (`scope` 1 to 3, `emission` in tCO2e, `reduction_percentage` 0 to 100, `name`), floats rounded to 2 decimals |
+| Plan sections (3.8.0) | Three headings | Four: `## Gases recomendados` is a JSON array between `## Método` and `## Raciocínio`. `[]` is a valid answer; a missing or invalid list goes through the plan-format retries |
+| Docs (3.8.1) | — | The `Gases recomendados` section and `AekoRecommendedGas` documented |
+| `recommended_gases[].name` (3.8.2) | Free-form name | Standard name plus the chemical formula, as `Name (formula)` |
+| `Guardrail de Saída` (3.8.2) | Also checked the draft against the analyses | A policy filter only: domain, internal leaks, injected instructions, sensitive data and tone. Code fences and agent names are rejected without calling the model |
+| `Verificador de Resposta` (3.8.2) | Rejected anything absent from the analyses | Also accepts the question's own data, math derived from it, technical constants and public references, and recomputes that math |
+
+---
+
+## What's new in 3.7
+
+Version 3.7 makes chat runs **safe to reject**: nothing is written and no personal data
+reaches a model before the answer is approved. No signature changed.
+
+| Area | 3.6 | 3.7 |
+| --- | --- | --- |
+| Writing tools (3.7.0) | Wrote as soon as an agent called them, even in a turn later rejected | Staged during the run and committed by the new `Consolidador` node, only after `Verificador de Resposta` approves (or after the report flow's coordinator). Retry-cap endings commit nothing |
+| A write that fails (3.7.0) | Not retried | Retried once; if it still fails, the tool's `metadata["write_failure_message"]` is appended to the chat answer. The report is never altered |
+| Personal data (3.7.1) | Sent to the models as typed | The new `Guardrail de Entrada` masks CPF, CNPJ, card and Brazilian phone numbers as placeholders such as `[CPF_1]`; the `Consolidador` restores them in the answer and in staged write arguments |
+| Reviewers (3.7.1) | Configured temperature | Temperature 0, so the same draft always gets the same verdict |
+| User-facing prompts (3.7.1) | Some used dashes and could expose the agents | Never name agents or the routing, and contain no em or en dash |
+
+---
+
+## What's new in 3.6
+
+Version 3.6 makes `analyze()` **recover the structured inventory** instead of failing on
+the first malformed JSON block. There was no 3.6.0 release; the line starts at 3.6.1.
+
+| Area | 3.5 | 3.6 |
+| --- | --- | --- |
+| Inventory JSON (3.6.1) | A missing or invalid block raised `MalformedAgentOutputError` | Salvaged (the ` ```inventory ` fence, else a single object after `Raciocínio`), canonicalized, validated against the catalogs, then filled from the schema up to `INVENTORY_SCHEMA_MAX_RETRIES` (2) times. The plan stays frozen; the final error is still `MalformedAgentOutputError` |
+| Tool errors (3.6.2) | A tool raising `ToolException` aborted the request | The exception becomes an observation the model can recover from |
+
+---
+
+## What's new in 3.5
+
+Version 3.5 makes `analyze()` return the **inventory aligned with Postgres** next to the
+plan. This one is breaking for `analyze()` callers.
+
+| Area | 3.4 | 3.5 |
+| --- | --- | --- |
+| `analyze()` arguments (3.5.0) | The inventory and its ids | Also `gases`, `scopes` and `categories`, keyword-only: the catalogs whose ids the payload reuses as foreign keys |
+| `analyze()` result (3.5.0) | Plan and metrics | `AekoAnalysisResponse.inventory`: an `AekoExtractedInventory` (description, period and `AekoInventoryEmission` lines, `is_reduction` telling emission from reduction rows) |
+| New public DTOs (3.5.0) | — | `AekoCatalogItem`, `AekoCategoryCatalogItem`, `AekoExtractedInventory`, `AekoInventoryCatalogs`, `AekoInventoryEmission` |
+| Routing marker (3.5.1) | Text after `Next agent:` could be read as the agent name | Only the last marker line is the handoff; a payload below it is kept, not misread |
+
+---
+
+## What's new in 3.4
+
+Version 3.4 adds **conversation summaries**, outside the agent graph.
+
+| Area | 3.3 | 3.4 |
+| --- | --- | --- |
+| `AekoMessenger.generate_summary(messages, *, id_request)` | — | Condenses the turns it is given, oldest first, without reading or updating a session |
+| `AekoSummaryResponse` | — | `summary`, ready for `user_memory`, plus `aeko_metrics` |
+
+---
+
+## What's new in 3.3
+
+Version 3.3 makes **sampling configurable** and adds CI. No breaking change.
+
+| Area | 3.2 | 3.3 |
+| --- | --- | --- |
+| `Aeko.config()` | Fixed sampling | `temperature`, `top_p` and `top_k`, defaulting to `1.0`, `0.95` and `64` |
+| CI | Publish on release only | Also `python -m pytest` on every push and pull request |
 
 ---
 
