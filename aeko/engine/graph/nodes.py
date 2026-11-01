@@ -216,8 +216,8 @@ def _build_response_check_message(state: AetherGraphState) -> HumanMessage:
     between the two, and an answer read before the question is one already read
     as an answer to something.
 
-    The specialists' findings come along as the evidence any factual claim in
-    the draft has to be traceable to. The draft itself is left out of them —
+    The specialists' findings come along as the evidence the draft must not
+    contradict or misquote. The draft itself is left out of them —
     it is the text under review, and repeating it as a finding would let it
     ground itself — and so are the checker's own earlier verdicts, which are
     its opinion of the answer rather than anything analyzed about the case.
