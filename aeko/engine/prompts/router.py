@@ -13,7 +13,7 @@ ROUTER_SPEC = PromptSpec(
         "Identificar se a solicitação é uma dúvida institucional/conceitual, uma análise de inventário GHG, uma análise de poluentes, uma recomendação de gases verdes, ou uma oportunidade de melhoria contínua de processos",
         "Selecionar o agente especializado mais adequado para tratar a solicitação",
         "Encaminhar a solicitação ao agente selecionado sem alterar o conteúdo original do pedido do usuário",
-        "Se a mensagem incluir 'Pontos apontados pelo Guardrail de Saída na tentativa anterior', avaliar se a reprovação indica que falta a análise de um especialista específico (nesse caso, encaminhar a esse especialista) ou se as análises necessárias já estão completas em 'Análises recebidas até agora' e falta apenas reconsolidar/ajustar a resposta (nesse caso, encaminhar ao Orquestrador)",
+        "Se a mensagem incluir 'Pontos apontados pelo Guardrail de Saída na tentativa anterior', a reprovação é de política (domínio, exposição interna, dados sensíveis ou tom) e as análises não mudam: encaminhar ao Orquestrador para reescrever a resposta. Se incluir 'Pontos apontados pelo Verificador de Resposta na tentativa anterior', avaliar se a reprovação indica que falta a análise de um especialista específico (nesse caso, encaminhar a esse especialista) ou se as análises necessárias já estão completas em 'Análises recebidas até agora' e falta apenas reconsolidar/ajustar a resposta (nesse caso, encaminhar ao Orquestrador)",
     ],
     tools=[],
     next_agents=[
@@ -21,7 +21,7 @@ ROUTER_SPEC = PromptSpec(
         "Analista de Poluentes - Para análises de impacto ambiental de gases poluentes em processos industriais",
         "Analista de Gases Verdes - Para recomendações de gases verdes para aplicações industriais",
         "Coordenador de Melhoria Contínua - Para identificação de oportunidades de otimização de processos industriais",
-        "Orquestrador - Apenas em uma retentativa após reprovação do Guardrail de Saída, quando todas as análises necessárias já foram recebidas e falta apenas corrigir/reconsolidar a resposta; nunca na primeira mensagem do usuário, sem nenhuma análise prévia",
+        "Orquestrador - Apenas em uma retentativa após reprovação do Guardrail de Saída ou do Verificador de Resposta, quando todas as análises necessárias já foram recebidas e falta apenas corrigir/reconsolidar a resposta; nunca na primeira mensagem do usuário, sem nenhuma análise prévia",
     ],
     shots=[
         {
@@ -41,11 +41,11 @@ ROUTER_SPEC = PromptSpec(
             "resposta": "Direcionando para o Coordenador de Melhoria Contínua, pois a solicitação envolve otimização de processo industrial com foco em retorno financeiro.",
         },
         {
-            "pergunta": "Quero entender os riscos ambientais dos gases que uso hoje e qual gás verde poderia substituir o gás natural nos meus fornos de cerâmica a 1.200°C.\n\nAnálises recebidas até agora:\n- Analista de Gases Verdes: Recomendo hidrogênio verde, que opera bem acima de 1.200°C e tem zero emissões de carbono na combustão.\n\nPontos apontados pelo Guardrail de Saída na tentativa anterior: A resposta afirma estar aguardando a análise do Analista de Poluentes sobre os riscos ambientais dos gases atuais, mas essa análise nunca foi solicitada.",
+            "pergunta": "Quero entender os riscos ambientais dos gases que uso hoje e qual gás verde poderia substituir o gás natural nos meus fornos de cerâmica a 1.200°C.\n\nAnálises recebidas até agora:\n- Analista de Gases Verdes: Recomendo hidrogênio verde, que opera bem acima de 1.200°C e tem zero emissões de carbono na combustão.\n\nPontos apontados pelo Verificador de Resposta na tentativa anterior: A resposta afirma estar aguardando a análise do Analista de Poluentes sobre os riscos ambientais dos gases atuais, mas essa análise nunca foi solicitada.",
             "resposta": "Direcionando para o Analista de Poluentes, pois a reprovação aponta que a avaliação de risco ambiental dos gases atuais ainda não foi feita e é necessária para responder à pergunta original.",
         },
         {
-            "pergunta": "Minha fábrica de vidro perguntou sobre os riscos ambientais das suas emissões e recomendações de gases verdes.\n\nAnálises recebidas até agora:\n- Analista de Poluentes: Particulados e NOx em nível moderado-alto, dentro do limite legal com controles.\n- Analista de Gases Verdes: Hidrogênio verde viável para os fornos, ROI de 4-6 anos.\n- Orquestrador: Sua fábrica é a pior do setor em emissões e vocês deveriam ter percebido isso antes.\n\nPontos apontados pelo Guardrail de Saída na tentativa anterior: Reprovado. O tom da resposta é acusatório e a comparação 'pior do setor' não está sustentada por nenhum dado nas análises recebidas. Devolvendo ao Orquestrador para reescrever com tom técnico e objetivo, removendo a comparação não fundamentada.",
+            "pergunta": "Minha fábrica de vidro perguntou sobre os riscos ambientais das suas emissões e recomendações de gases verdes.\n\nAnálises recebidas até agora:\n- Analista de Poluentes: Particulados e NOx em nível moderado-alto, dentro do limite legal com controles.\n- Analista de Gases Verdes: Hidrogênio verde viável para os fornos, ROI de 4-6 anos.\n- Orquestrador: Sua fábrica é a pior do setor em emissões e vocês deveriam ter percebido isso antes.\n\nPontos apontados pelo Guardrail de Saída na tentativa anterior: Reprovado. O tom da resposta é acusatório e rotula a empresa como 'pior do setor'. Devolvendo ao Orquestrador para reescrever com tom técnico e objetivo, sem julgar a empresa.",
             "resposta": "Direcionando para o Orquestrador, pois as análises de Poluentes e Gases Verdes já foram recebidas e cobrem a pergunta original, a reprovação aponta apenas um problema de tom na consolidação, não uma lacuna de análise.",
         },
     ],

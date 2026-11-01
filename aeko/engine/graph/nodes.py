@@ -1,5 +1,7 @@
 """Graph node functions for the conversational and inventory report flows."""
 
+import re
+
 from functools import wraps
 
 from typing import Any, Callable
@@ -20,7 +22,7 @@ from aeko.engine.graph.constants import (
 
 from aeko.engine.graph.state import AetherGraphState, NextAgent
 
-from aeko.engine.prompts import INVENTORY_PAYLOAD_INSTRUCTIONS
+from aeko.engine.prompts import AGENT_NAMES, INVENTORY_PAYLOAD_INSTRUCTIONS
 
 from aeko.engine.runtime import RUNTIME, text_of
 
@@ -28,7 +30,12 @@ from aeko.shared import agent_call, current_run
 
 from aeko.shared.personal_data import mask, unmask
 
-from aeko.shared.text import next_agent_name
+from aeko.shared.text import next_agent_name, strip_routing_marker
+
+
+_LEAKED_AGENT = re.compile(
+    "|".join(rf"\b{re.escape(name)}\b" for name in AGENT_NAMES if name != "FAQ")
+)
 
 
 def _max_tokens_from(config: RunnableConfig | None) -> int:
@@ -112,8 +119,9 @@ def _build_context_message(state: AetherGraphState) -> HumanMessage:
     retry) can tell whether the gap is a missing specialist analysis or just
     a consolidation/tone fix, instead of guessing blind. Both are carried
     because they are rejections of different things: the guardrail refuses a
-    draft that is unfounded or badly toned, while the response checker refuses
-    one that does not answer what was asked.
+    draft that breaks policy (domain, leaks, injection, sensitive data, tone),
+    while the response checker refuses one that is unfounded or does not
+    answer what was asked.
 
     Args:
         state: The current graph state.
@@ -173,24 +181,18 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
     """
     Build the isolated review request sent to the output guardrail.
 
-    Matches the shape the guardrail's own prompt is designed for (see its
-    few-shot examples): the draft, the original question, and the specialist
-    findings backing it up. Without the question and findings, the guardrail
-    has no way to fulfill its own stated task of checking that the draft is
-    actually grounded in the analyses and fully answers the original request
-    ("sem lacunas relevantes") — it can only judge tone in a vacuum.
+    The guardrail is a policy filter, so it gets only the draft and the
+    question. The specialists' findings are left out on purpose: any check
+    that needs them is grounding, which is the response checker's job.
 
     Args:
         state: The current graph state, whose "output" holds the Orquestrador's
-            draft answer and whose "previous_agents" holds the specialists'
-            findings.
+            draft answer.
 
     Returns:
-        HumanMessage: The review request wrapping the draft, the original
-            question, and any supporting findings.
+        HumanMessage: The review request wrapping the draft and the original
+            question.
     """
-
-    previous = state.get("previous_agents") or {}
 
     draft = state.get("output") or ""
 
@@ -198,13 +200,6 @@ def _build_guardrail_message(state: AetherGraphState) -> HumanMessage:
         f"Revise esta resposta: '{draft}'",
         f"Pergunta original do usuário: {state['initial_question']}",
     ]
-
-    findings = {
-        name: output for name, output in previous.items() if name != "Orquestrador"
-    }
-
-    if findings:
-        parts.append(f"Análises recebidas:\n{_format_findings(findings)}")
 
     if _owns_writing_tool("Guardrail de Saída"):
         parts.extend(_staged_writes_section(state))
@@ -221,8 +216,8 @@ def _build_response_check_message(state: AetherGraphState) -> HumanMessage:
     between the two, and an answer read before the question is one already read
     as an answer to something.
 
-    The specialists' findings come along as the evidence any factual claim in
-    the draft has to be traceable to. The draft itself is left out of them —
+    The specialists' findings come along as the evidence the draft must not
+    contradict or misquote. The draft itself is left out of them —
     it is the text under review, and repeating it as a finding would let it
     ground itself — and so are the checker's own earlier verdicts, which are
     its opinion of the answer rather than anything analyzed about the case.
@@ -558,6 +553,39 @@ def _orquestrador_node(
     }
 
 
+def _policy_violation(draft: str) -> str | None:
+    """
+    Reject the policy breaks a regex can catch, without calling the model.
+
+    Args:
+        draft: The Orquestrador's draft, routing marker included.
+
+    Returns:
+        str | None: A "Reprovado." verdict for a code fence or an internal agent
+            name in the answer, or None when the model has to decide.
+    """
+
+    answer = strip_routing_marker(draft)
+
+    if "```" in answer:
+        return (
+            "Reprovado. A resposta contém um bloco de código, que não faz parte do "
+            "que a Aether oferece. Devolvendo ao Roteador: remover o código e "
+            "explicar em texto, dentro do domínio."
+        )
+
+    leaked = _LEAKED_AGENT.search(answer)
+
+    if leaked:
+        return (
+            f"Reprovado. A resposta cita o agente interno '{leaked.group()}', o que "
+            "expõe a estrutura multiagente. Devolvendo ao Roteador: reescrever como "
+            "um assistente único, sem nomear agentes."
+        )
+
+    return None
+
+
 def _guardrail_node(
     state: AetherGraphState, config: RunnableConfig | None = None
 ) -> dict:
@@ -569,6 +597,9 @@ def _guardrail_node(
     here at all. Writing on approval would hand the user an answer the checker
     was about to reject, since that channel is exactly what the facade reads
     the delivered answer from.
+
+    A code fence or an internal agent name is rejected without calling the
+    model (see `_policy_violation`); the model only rules on the fuzzy cases.
 
     On rejection, the review feedback and the retry count are recorded, so the
     run can loop back to the router with something to act on.
@@ -582,17 +613,23 @@ def _guardrail_node(
             "guard_rail_retries".
     """
 
-    message = _build_guardrail_message(state)
+    output, next_agent = _policy_violation(state.get("output") or ""), None
 
-    output, next_agent = _invoke_agent(
-        "Guardrail de Saída", message, _max_tokens_from(config)
-    )
+    if output is None:
+        output, next_agent = _invoke_agent(
+            "Guardrail de Saída",
+            _build_guardrail_message(state),
+            _max_tokens_from(config),
+        )
 
     approved = output.strip().lower().startswith("aprovado")
 
     update = {"next_agent": next_agent, "guard_rail_approved": approved}
 
-    if not approved:
+    if approved:
+        update["guard_rail_requested_changes"] = []
+
+    else:
         update["guard_rail_requested_changes"] = [output]
 
         update["guard_rail_retries"] = state["guard_rail_retries"] + 1
@@ -613,9 +650,9 @@ def _verificador_resposta_node(
     recorded, so the run can loop back to the router.
 
     It reviews what the guardrail already approved rather than replacing it:
-    the guardrail asks whether the draft is founded and well-toned, this asks
-    whether it is an answer to what was actually asked, and a draft can pass
-    the first and fail the second — which is the hallucination this node exists
+    the guardrail asks whether the draft is allowed to reach the user at all,
+    this asks whether it is founded and an answer to what was actually asked,
+    and a draft can pass the first and fail the second — which is the hallucination this node exists
     to keep off the user's screen.
 
     Its verdict is recorded in "previous_agents" like any other agent's output,

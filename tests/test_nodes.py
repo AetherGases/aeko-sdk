@@ -1,5 +1,7 @@
 """tests/test_nodes.py."""
 
+import pytest
+
 from langchain_core.messages import HumanMessage
 
 
@@ -160,8 +162,8 @@ def test_build_guardrail_message_handles_missing_draft():
     )
 
 
-def test_build_guardrail_message_includes_specialist_findings():
-    """Build guardrail message includes specialist findings."""
+def test_build_guardrail_message_leaves_out_specialist_findings():
+    """The guardrail is a policy filter: grounding belongs to the checker."""
     state = _state_with(
         output="Resposta consolidada.",
         previous_agents={
@@ -174,11 +176,9 @@ def test_build_guardrail_message_includes_specialist_findings():
 
     assert "Pergunta original do usuário: Pergunta de teste" in message.content
 
-    assert "Análises recebidas:" in message.content
+    assert "Análises recebidas:" not in message.content
 
-    assert "- Analista de Poluentes: Emissoes criticas de NOx." in message.content
-
-    assert "- Orquestrador:" not in message.content
+    assert "Emissoes criticas de NOx." not in message.content
 
 
 def test_invoke_agent_sends_a_single_message_to_the_agent(use_agents):
@@ -753,9 +753,55 @@ def test_guardrail_node_approves_without_delivering_the_draft(use_agents):
 
     assert result["guard_rail_approved"] is True
 
-    assert "guard_rail_requested_changes" not in result
+    assert result["guard_rail_requested_changes"] == [], (
+        "uma reprovação antiga do guardrail desviaria o Roteador na retentativa do Verificador"
+    )
 
     assert "guard_rail_retries" not in result
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "Segue:\n```python\nprint(1)\n```",
+        "Segundo o Analista de Poluentes, o CO2 está em nível crítico.",
+    ],
+)
+def test_guardrail_node_rejects_code_and_agent_names_without_the_model(
+    use_agents, draft
+):
+    """Code fences and internal agent names never reach the model."""
+    guardrail = _FakeAgent("Aprovado.\nNext agent: Nenhum")
+
+    use_agents({"Guardrail de Saída": guardrail})
+
+    state = _state_with(output=draft, guard_rail_retries=0)
+
+    result = nodes._guardrail_node(state)
+
+    assert guardrail.last_input is None
+
+    assert result["guard_rail_approved"] is False
+
+    assert result["guard_rail_requested_changes"][0].startswith("Reprovado.")
+
+    assert result["guard_rail_retries"] == 1
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        "CO2 em nível crítico.\nNext agent: Guardrail de Saída",
+        "Veja o FAQ do site para os prazos de envio do inventário.",
+    ],
+)
+def test_guardrail_node_leaves_protocol_and_faq_to_the_model(use_agents, draft):
+    """The routing marker is protocol and "FAQ" is a common word, not leaks."""
+    use_agents({"Guardrail de Saída": _FakeAgent("Aprovado.\nNext agent: Nenhum")})
+
+    state = _state_with(output=draft)
+
+    assert nodes._guardrail_node(state)["guard_rail_approved"] is True
 
 
 def test_guardrail_node_does_not_touch_messages_on_rejection(use_agents):

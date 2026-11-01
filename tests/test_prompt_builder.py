@@ -293,7 +293,7 @@ def test_reviewers_have_shots_rejecting_code_and_embedded_instructions(agent):
     """Reviewers have shots rejecting code and embedded instructions."""
     shots = PROMPT_SPECS[agent].shots
 
-    assert any("```" in s["pergunta"] and s["resposta"].startswith("Reprovado.") for s in shots)
+    assert any("def " in s["pergunta"] and s["resposta"].startswith("Reprovado.") for s in shots)
 
     assert any("ignore" in s["pergunta"].lower() and s["resposta"].startswith("Reprovado.") for s in shots)
 
