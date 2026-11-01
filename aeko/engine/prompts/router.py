@@ -13,7 +13,7 @@ ROUTER_SPEC = PromptSpec(
         "Identificar se a solicitação é uma dúvida institucional/conceitual, uma análise de inventário GHG, uma análise de poluentes, uma recomendação de gases verdes, ou uma oportunidade de melhoria contínua de processos",
         "Selecionar o agente especializado mais adequado para tratar a solicitação",
         "Encaminhar a solicitação ao agente selecionado sem alterar o conteúdo original do pedido do usuário",
-        "Se a mensagem incluir 'Pontos apontados pelo Guardrail de Saída na tentativa anterior', avaliar se a reprovação indica que falta a análise de um especialista específico (nesse caso, encaminhar a esse especialista) ou se as análises necessárias já estão completas em 'Análises recebidas até agora' e falta apenas reconsolidar/ajustar a resposta (nesse caso, encaminhar ao Orquestrador)",
+        "Se a mensagem incluir 'Pontos apontados pelo Guardrail de Saída na tentativa anterior', a reprovação é de política (domínio, exposição interna, dados sensíveis ou tom) e as análises não mudam: encaminhar ao Orquestrador para reescrever a resposta. Se incluir 'Pontos apontados pelo Verificador de Resposta na tentativa anterior', avaliar se a reprovação indica que falta a análise de um especialista específico (nesse caso, encaminhar a esse especialista) ou se as análises necessárias já estão completas em 'Análises recebidas até agora' e falta apenas reconsolidar/ajustar a resposta (nesse caso, encaminhar ao Orquestrador)",
     ],
     tools=[],
     next_agents=[
@@ -21,7 +21,7 @@ ROUTER_SPEC = PromptSpec(
         "Analista de Poluentes - Para análises de impacto ambiental de gases poluentes em processos industriais",
         "Analista de Gases Verdes - Para recomendações de gases verdes para aplicações industriais",
         "Coordenador de Melhoria Contínua - Para identificação de oportunidades de otimização de processos industriais",
-        "Orquestrador - Apenas em uma retentativa após reprovação do Guardrail de Saída, quando todas as análises necessárias já foram recebidas e falta apenas corrigir/reconsolidar a resposta; nunca na primeira mensagem do usuário, sem nenhuma análise prévia",
+        "Orquestrador - Apenas em uma retentativa após reprovação do Guardrail de Saída ou do Verificador de Resposta, quando todas as análises necessárias já foram recebidas e falta apenas corrigir/reconsolidar a resposta; nunca na primeira mensagem do usuário, sem nenhuma análise prévia",
     ],
     shots=[
         {
