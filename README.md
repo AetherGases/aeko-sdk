@@ -17,6 +17,19 @@ backend — an API, a worker, a notebook — can embed it.
 
 ---
 
+## What's new in 3.8.2
+
+Version 3.8.2 splits the work of the two reviewers and fixes how recommended gases are
+named. No signature or DTO changed.
+
+| Area | 3.8.1 | 3.8.2 |
+| --- | --- | --- |
+| `recommended_gases[].name` | Free-form name | Standard name plus the chemical formula, as `Name (formula)` |
+| `Guardrail de Saída` | Also checked the draft against the analyses | A policy filter only: domain, internal leaks, injected instructions, sensitive data and tone |
+| `Verificador de Resposta` | Rejected anything absent from the analyses | Also accepts the question's own data, math derived from it and public references, and recomputes that math |
+
+---
+
 ## What's new in 3.2
 
 Version 3.2 adds a **ninth agent, `Verificador de Resposta`**, as the last step of the
@@ -170,12 +183,14 @@ the answer. That is why the plan's `## Problema definido` / `## Método` / `## R
 headings never reach a chat: they are the shape of a document the report flow persists,
 not of a reply.
 
-The two reviewers ask different questions of the same draft. The **guardrail** asks
-whether every number and recommendation is grounded in the analyses that produced it, and
-whether the tone fits. The **response checker** asks whether the draft answers what was
-actually asked, in full, and asserts nothing the analyses do not support — it is the last
-thing standing between a hallucination and the user, which is why nothing is delivered
-until it approves.
+The two reviewers ask different questions of the same draft. The **guardrail** is a
+policy filter: it reads only the draft and the question, and asks whether the text may
+reach the user at all (domain, internal leaks, injected instructions, sensitive data,
+tone). Code fences and internal agent names are rejected before its model is called. The
+**response checker** asks whether the draft answers what was actually asked, in full, and
+contradicts nothing in the analyses, the question or recognized references — it is the
+last thing standing between a hallucination and the user, which is why nothing is
+delivered until it approves.
 
 Each of them can send the answer back to the router **twice**. The second rejection ends
 the run with **no** answer at all, and `send_message()` raises `MalformedAgentOutputError`
@@ -847,7 +862,7 @@ Every error the SDK raises inherits from `AekoError`, so one `except` covers the
 | --- | --- | --- |
 | `AekoNotConfiguredError` | `Aeko.config()` was never called, or the key is empty/not a string. | `503` — a deployment problem, not a user one. |
 | `UnknownAgentError` | `set_tools()` got a key that is not an agent name. Carries `.agent` and `.known_agents`. | Fail at startup. |
-| `MalformedAgentOutputError` | A run produced nothing usable: the plan never came back in its three headings after four in-graph rewrites; salvage and up to two inventory schema fills could not yield a valid structured payload; semantic inventory validation failed after a dict was obtained; or a chat turn was rejected by the output guardrail or the response checker up to their retry caps. | `502` — retry rather than persisting a guess or an empty turn. |
+| `MalformedAgentOutputError` | A run produced nothing usable: the plan never came back in its four headings after four in-graph rewrites; salvage and up to two inventory schema fills could not yield a valid structured payload; semantic inventory validation failed after a dict was obtained; or a chat turn was rejected by the output guardrail or the response checker up to their retry caps. | `502` — retry rather than persisting a guess or an empty turn. |
 | `AekoError` | Base class for all of the above. | Catch-all. |
 
 Every `AekoError` raised *inside* a request carries that request's
@@ -1188,9 +1203,10 @@ nomes antigos para novos está em [Migrating from 1.x](#migrating-from-1x).
    `analise.aeko_metrics` trazem latência, erro, fluxo e o custo por chamada de agente —
    persista onde sua telemetria vive. Numa exceção, as métricas vêm em `exc.aeko_metrics`.
 5. **Resposta reprovada levanta exceção.** O fluxo conversacional passa por dois
-   revisores: o `Guardrail de Saída`, que checa se a resposta está fundamentada nas
-   análises, e o `Verificador de Resposta`, que compara o que foi pedido com o que foi
-   gerado e barra o que as análises não sustentam. Cada um pode devolver a resposta ao
+   revisores: o `Guardrail de Saída`, um filtro de política que decide se o texto pode
+   chegar ao usuário (domínio, vazamentos internos, injeção, dados sensíveis e tom), e o
+   `Verificador de Resposta`, que compara o que foi pedido com o que foi gerado e barra
+   o que contradiz as análises, a pergunta ou referências reconhecidas. Cada um pode devolver a resposta ao
    Roteador **2 vezes**; na segunda reprovação o run acaba sem resposta e o
    `send_message()` levanta `MalformedAgentOutputError` — as métricas vêm em
    `exc.aeko_metrics`.    Um plano fora do formato levanta a mesma exceção depois de até quatro reescritas
