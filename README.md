@@ -13,6 +13,16 @@ This package is the reusable engine behind that product. It is a **library, not 
 service**: it exposes a small facade over a LangChain/LangGraph agent graph so any
 backend — an API, a worker, a notebook — can embed it.
 
+## Where it fits
+
+Aeko is the AI core of [Aether](https://github.com/AetherGases), a platform that helps industrial companies measure and cut their greenhouse gas emissions. In Aether the SDK is embedded by [`ms-aeko-hub`](https://github.com/AetherGases/ms-aeko-hub), which owns HTTP, persistence, authentication and the ChatGPT MCP server, and passes conversation documents and inventories into `aeko`. The package holds no database of its own: persistence, sessions and tools belong to the host.
+
+```text
+apps (web, mobile, ChatGPT) ─▶ Kong ─▶ ms-aeko-hub ─▶ aeko (this package) ─▶ Gemini
+                                         │                       └─ tools you register (RAG, calculators, web search)
+                                         └─ MongoDB · Redis · Aether microservices
+```
+
 > 🇧🇷 Um resumo em português está no final deste documento: [Resumo em português](#resumo-em-português).
 
 ---
